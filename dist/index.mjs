@@ -426,6 +426,7 @@ class G1Robot {
     return target.set(x, z, -y);
   }
 }
+const FADE_FRAMES = 8;
 const GAIT_SPEEDS = { walk: 1.13, run: 3.43 };
 class G1Controller {
   constructor(engine, bricks, x = 0, y = 0, angle = 0) {
@@ -440,6 +441,9 @@ class G1Controller {
     this._dirty = false;
     this._pending = null;
     this._retryIn = 0;
+    this._fade = null;
+    this._segmentPose = new Float32Array(POSE_SIZE);
+    this._fadePose = new Float32Array(POSE_SIZE);
     this.engine = engine;
     this.bricks = bricks;
     this.pose = placePoses(bricks.rest, x, y, angle)[0];
@@ -480,6 +484,10 @@ class G1Controller {
   update(dt) {
     this._retryIn = Math.max(0, this._retryIn - dt);
     const seg = this._segment;
+    if (this._fade) {
+      this._fade.frame += dt * SAMPLE_RATE;
+      this._fade.t += dt * SAMPLE_RATE;
+    }
     if (seg) {
       this._frame = Math.min(this._frame + dt * SAMPLE_RATE, seg.poses.length - 1);
       if (this._pending && this._frame >= this._pending.request.startFrame) this._switch();
@@ -488,22 +496,36 @@ class G1Controller {
     const current = this._segment;
     if (!current) return;
     const last = current.poses.length - 1;
-    const f = Math.min(this._frame, last);
-    const i = Math.floor(f);
-    lerpPose(current.poses[i], current.poses[Math.min(i + 1, last)], f - i, this.pose);
+    samplePoses(current.poses, this._frame, this._segmentPose);
+    const fade = this._fade;
+    if (fade) {
+      const w = Math.min(fade.t / FADE_FRAMES, 1);
+      samplePoses(fade.segment.poses, fade.frame, this._fadePose);
+      lerpPose(this._fadePose, this._segmentPose, w * w * (3 - 2 * w), this.pose);
+      if (w >= 1) this._fade = null;
+    } else this.pose.set(this._segmentPose);
     if (current.stopping && this._frame >= last && !this._pending && !this._request) {
       this._segment = null;
+      this._fade = null;
       if (this.goal && this._distanceToGoal() < 0.35) this.goal = null;
       else if (this.goal) this._generate(true);
       return;
     }
     if (!this._request && !this._pending && !current.stopping && this._retryIn <= 0) {
       const transition = last - current.transitionEarly;
-      if (this._frame + this._latencyFrames() >= transition) this._generate(false);
+      if (this._frame + this._latencyFrames() * 1.5 >= transition) this._generate(false);
     }
   }
   _latencyFrames() {
-    return Math.ceil((this.stats.averageInferenceMs || 400) / 1e3 * SAMPLE_RATE) + 2;
+    const s = this.stats;
+    return Math.ceil(Math.max(s.averageInferenceMs || 400, s.lastInferenceMs) / 1e3 * SAMPLE_RATE) + 2;
+  }
+  /**
+   * Seconds of travel to the gait target. A segment lasts about that long, and the next one is generated while
+   * it plays, so it must outlast the inference with room to spare, or playback reaches its end first and waits.
+   */
+  get effectiveLead() {
+    return Math.min(Math.max(this.lead, (this._latencyFrames() + 10 + 8) / SAMPLE_RATE), 1.6);
   }
   _distanceToGoal() {
     return this.goal ? Math.hypot(this.goal[0] - this.pose[0], this.goal[1] - this.pose[1]) : 0;
@@ -534,8 +556,9 @@ class G1Controller {
     const angle = distance > 0.3 ? Math.atan2(dy, dx) : facing;
     let targets;
     let stopping;
-    if (distance > speed * this.lead + 0.8) {
-      const ahead = speed * this.lead;
+    const lead = this.effectiveLead;
+    if (distance > speed * lead + 0.8) {
+      const ahead = speed * lead;
       targets = placePoses(withSpeed(this.bricks[this.gait], speed), from[0] + Math.cos(angle) * ahead, from[1] + Math.sin(angle) * ahead, angle);
       stopping = false;
     } else {
@@ -582,11 +605,13 @@ class G1Controller {
       const frames = [...seg.prefix, ...seg.poses];
       const end = request.startFrame + seg.prefix.length;
       prefix = frames.slice(end - 3, end);
+      this._fade = { segment: seg, frame: this._frame, t: 0 };
       this._frame = Math.max(0, this._frame - request.startFrame);
     } else {
       const p = Float32Array.from(poses[0]);
       prefix = [p, p, p];
       this._frame = 0;
+      this._fade = null;
     }
     this._segment = {
       poses,
@@ -595,6 +620,12 @@ class G1Controller {
       stopping: request.stopping
     };
   }
+}
+function samplePoses(poses, frame, out) {
+  const last = poses.length - 1;
+  const f = Math.min(Math.max(frame, 0), last);
+  const i = Math.floor(f);
+  return lerpPose(poses[i], poses[Math.min(i + 1, last)], f - i, out);
 }
 const G1_BRICKS = {
   rest: [
@@ -775,8 +806,9 @@ class MotionBricksCharacter {
     if (!engine) engine = await MotionBricksG1.Load(await loadOrt(ortUrl, o.wasm), model, sessionOptions, progress);
     onProgress?.("warmup", 0, 1);
     const rest = Float32Array.from((o.bricks ?? G1_BRICKS).rest[0]);
+    let warmupMs = 0;
     try {
-      await engine.generate([rest, rest, rest, rest], [rest]);
+      warmupMs = (await engine.generate([rest, rest, rest, rest], [rest])).inferenceMs;
     } catch (e) {
       if (engine instanceof MotionBricksRemote) engine.worker.terminate();
       throw e;
@@ -785,6 +817,7 @@ class MotionBricksCharacter {
     const p = this._lastPose;
     const c = p ? new G1Controller(engine, o.bricks ?? G1_BRICKS, p[0], p[1], heading([p[3], p[4], p[5], p[6]])) : new G1Controller(engine, o.bricks ?? G1_BRICKS);
     c.gait = this.gait;
+    c.stats.averageInferenceMs = warmupMs;
     c.onError = (e) => this.onError ? this.onError(e) : console.error("MotionBricks: generation failed", e);
     this.controller = c;
     if (this._pendingGoal) c.moveTo(...this._pendingGoal, this.gait);
@@ -829,7 +862,7 @@ class MotionBricksCharacter {
     const [ox, oy] = G1Robot.ToG1(origin);
     const [dx, dy] = this._toG1(direction);
     const angle = Math.atan2(dy - oy, dx - ox);
-    const ahead = GAIT_SPEEDS[gait] * c.lead + 4;
+    const ahead = GAIT_SPEEDS[gait] * c.effectiveLead + 4;
     const goal = [c.pose[0] + Math.cos(angle) * ahead, c.pose[1] + Math.sin(angle) * ahead];
     const d = this._drive;
     const turn = Math.abs(Math.atan2(Math.sin(angle - d.angle), Math.cos(angle - d.angle)));

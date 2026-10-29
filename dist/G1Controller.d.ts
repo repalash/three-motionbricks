@@ -21,7 +21,7 @@ export declare class G1Controller {
     readonly pose: G1Pose;
     goal: [number, number] | null;
     gait: G1Gait;
-    /** Seconds of travel between the robot and its gait target. */
+    /** Seconds of travel between the robot and its gait target, at least. Slow inference places it further. */
     lead: number;
     stats: G1ControllerStats;
     onGenerated?: (motion: G1Pose[], targets: G1Pose[]) => void;
@@ -34,6 +34,13 @@ export declare class G1Controller {
     private _pending;
     /** Seconds to wait before generating on its own again, after a failed generation. */
     private _retryIn;
+    /**
+     * The segment being replaced, still playing while the new one fades in. Motion that arrives late starts
+     * a few frames in, and the fade hides the difference from the frame shown.
+     */
+    private _fade;
+    private _segmentPose;
+    private _fadePose;
     constructor(engine: MotionGenerator, bricks: G1Bricks, x?: number, y?: number, angle?: number);
     get moving(): boolean;
     get generating(): boolean;
@@ -56,6 +63,11 @@ export declare class G1Controller {
     /** Advance playback by dt seconds and update pose. */
     update(dt: number): void;
     private _latencyFrames;
+    /**
+     * Seconds of travel to the gait target. A segment lasts about that long, and the next one is generated while
+     * it plays, so it must outlast the inference with room to spare, or playback reaches its end first and waits.
+     */
+    get effectiveLead(): number;
     private _distanceToGoal;
     /** The frame of the current segment where new motion can start, and the four context poses ending there. */
     private _contextAt;
