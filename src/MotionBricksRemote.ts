@@ -1,3 +1,4 @@
+/// <reference path="./env.d.ts" />
 import type {GenerateOptions, GeneratedMotion, MotionGenerator, ProgressCallback} from './MotionBricksG1'
 import type {WorkerLoadOptions, WorkerRequest} from './MotionBricksWorker'
 import workerUrl from './MotionBricksWorker.ts?worker&url'
