@@ -89,6 +89,15 @@ function fadeWeight(v) {
   const r = 1 - t;
   return t < 0.5 ? 1 - 2 * t * t : 2 * r * r;
 }
+async function setupOrtWeb(ort, wasm) {
+  ort.env.logLevel = "error";
+  ort.env.wasm.numThreads = globalThis.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
+  if (!wasm?.length) return;
+  const parts = await Promise.all(wasm.map(async (u) => fetchBytes(u)));
+  const binary = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  parts.reduce((offset, p) => (binary.set(p, offset), offset + p.length), 0);
+  ort.env.wasm.wasmBinary = binary.buffer;
+}
 async function fetchBytes(url, onBytes, target, offset = 0) {
   const res = await fetch(url);
   if (!res.ok || !res.body) throw new Error(`Could not download ${url}: HTTP ${res.status}`);
@@ -165,6 +174,10 @@ class MotionBricksG1 {
       ...sessionOptions,
       externalData: [{ path: manifest.weights, data: new Uint8Array(weights.buffer) }]
     });
+  }
+  /** Load a pack folder from tools/pack_model.py (a URL ending in /) or an original .onnx file. */
+  static async Load(ort, model, sessionOptions = {}, onProgress) {
+    return model.endsWith("/") ? MotionBricksG1.LoadPacked(ort, model, sessionOptions, onProgress) : MotionBricksG1.LoadOnnx(ort, model, sessionOptions, onProgress);
   }
   /** Load an original MotionBricks G1 .onnx file, such as mmm_v6_g1_fp32.onnx. */
   static async LoadOnnx(ort, url, sessionOptions = {}, onProgress) {
@@ -304,14 +317,7 @@ async function load(id, o) {
     /* @vite-ignore */
     o.ort
   );
-  ort.env.logLevel = "error";
-  ort.env.wasm.numThreads = scope.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
-  if (o.wasm?.length) {
-    const parts = await Promise.all(o.wasm.map(async (u) => new Uint8Array(await (await fetch(u)).arrayBuffer())));
-    const binary = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-    parts.reduce((offset, p) => (binary.set(p, offset), offset + p.length), 0);
-    ort.env.wasm.wasmBinary = binary.buffer;
-  }
+  await setupOrtWeb(ort, o.wasm);
   let last = 0;
   const progress = (loaded, total) => {
     const now = performance.now();
@@ -319,7 +325,7 @@ async function load(id, o) {
     last = now;
     scope.postMessage({ id, type: "progress", loaded, total });
   };
-  engine = o.model.endsWith("/") ? await MotionBricksG1.LoadPacked(ort, o.model, o.sessionOptions, progress) : await MotionBricksG1.LoadOnnx(ort, o.model, o.sessionOptions, progress);
+  engine = await MotionBricksG1.Load(ort, o.model, o.sessionOptions, progress);
   return { backend: engine.backend };
 }
 scope.onmessage = async (e) => {

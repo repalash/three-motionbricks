@@ -99,6 +99,15 @@ function fadeWeight(v) {
   const r = 1 - t;
   return t < 0.5 ? 1 - 2 * t * t : 2 * r * r;
 }
+async function setupOrtWeb(ort, wasm) {
+  ort.env.logLevel = "error";
+  ort.env.wasm.numThreads = globalThis.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
+  if (!wasm?.length) return;
+  const parts = await Promise.all(wasm.map(async (u) => fetchBytes(u)));
+  const binary = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  parts.reduce((offset, p) => (binary.set(p, offset), offset + p.length), 0);
+  ort.env.wasm.wasmBinary = binary.buffer;
+}
 async function fetchBytes(url, onBytes, target, offset = 0) {
   const res = await fetch(url);
   if (!res.ok || !res.body) throw new Error(`Could not download ${url}: HTTP ${res.status}`);
@@ -175,6 +184,10 @@ class MotionBricksG1 {
       ...sessionOptions,
       externalData: [{ path: manifest.weights, data: new Uint8Array(weights.buffer) }]
     });
+  }
+  /** Load a pack folder from tools/pack_model.py (a URL ending in /) or an original .onnx file. */
+  static async Load(ort, model, sessionOptions = {}, onProgress) {
+    return model.endsWith("/") ? MotionBricksG1.LoadPacked(ort, model, sessionOptions, onProgress) : MotionBricksG1.LoadOnnx(ort, model, sessionOptions, onProgress);
   }
   /** Load an original MotionBricks G1 .onnx file, such as mmm_v6_g1_fp32.onnx. */
   static async LoadOnnx(ort, url, sessionOptions = {}, onProgress) {
@@ -426,6 +439,7 @@ class G1Controller {
     this._requestId = 0;
     this._dirty = false;
     this._pending = null;
+    this._retryIn = 0;
     this.engine = engine;
     this.bricks = bricks;
     this.pose = placePoses(bricks.rest, x, y, angle)[0];
@@ -447,25 +461,30 @@ class G1Controller {
   moveTo(x, y, gait = this.gait) {
     this.goal = [x, y];
     this.gait = gait;
-    if (this._request) this._dirty = true;
-    else this._generate(true);
+    this._regenerate();
   }
   /** Come to a stop a short way ahead. */
   stop() {
-    if (!this._segment) return;
-    const a = heading([this.pose[3], this.pose[4], this.pose[5], this.pose[6]]);
-    const ahead = 0.5 * GAIT_SPEEDS[this.gait];
-    this.goal = [this.pose[0] + Math.cos(a) * ahead, this.pose[1] + Math.sin(a) * ahead];
-    if (this._request) this._dirty = true;
+    this.goal = null;
+    if (this._segment || this._request || this._pending) this._regenerate();
+  }
+  /**
+   * Generate for the new goal now, or once the motion in flight is in place: a request's start frame
+   * belongs to the segment it was made from, so none is made while another waits to take over.
+   */
+  _regenerate() {
+    if (this._request || this._pending) this._dirty = true;
     else this._generate(true);
   }
   /** Advance playback by dt seconds and update pose. */
   update(dt) {
+    this._retryIn = Math.max(0, this._retryIn - dt);
     const seg = this._segment;
     if (seg) {
-      this._frame += dt * SAMPLE_RATE;
+      this._frame = Math.min(this._frame + dt * SAMPLE_RATE, seg.poses.length - 1);
       if (this._pending && this._frame >= this._pending.request.startFrame) this._switch();
     } else if (this._pending) this._switch();
+    if (this._dirty && !this._request && !this._pending) this._generate(true);
     const current = this._segment;
     if (!current) return;
     const last = current.poses.length - 1;
@@ -478,7 +497,7 @@ class G1Controller {
       else if (this.goal) this._generate(true);
       return;
     }
-    if (!this._request && !this._pending && !current.stopping) {
+    if (!this._request && !this._pending && !current.stopping && this._retryIn <= 0) {
       const transition = last - current.transitionEarly;
       if (this._frame + this._latencyFrames() >= transition) this._generate(false);
     }
@@ -506,11 +525,13 @@ class G1Controller {
   _generate(now) {
     const { startFrame, context } = this._contextAt(now);
     const from = context[3];
-    const goal = this.goal ?? [from[0], from[1]];
+    const speed = GAIT_SPEEDS[this.gait];
+    const facing = heading([from[3], from[4], from[5], from[6]]);
+    const stopAhead = this._segment ? 0.5 * speed : 0;
+    const goal = this.goal ?? [from[0] + Math.cos(facing) * stopAhead, from[1] + Math.sin(facing) * stopAhead];
     const dx = goal[0] - from[0], dy = goal[1] - from[1];
     const distance = Math.hypot(dx, dy);
-    const speed = GAIT_SPEEDS[this.gait];
-    const angle = distance > 0.3 ? Math.atan2(dy, dx) : heading([from[3], from[4], from[5], from[6]]);
+    const angle = distance > 0.3 ? Math.atan2(dy, dx) : facing;
     let targets;
     let stopping;
     if (distance > speed * this.lead + 0.8) {
@@ -520,12 +541,13 @@ class G1Controller {
     } else {
       if (!this._segment && distance < 0.35) {
         this.goal = null;
+        this._dirty = false;
         return;
       }
       targets = placePoses(this.bricks.rest, goal[0], goal[1], angle);
       stopping = true;
     }
-    const request = { id: ++this._requestId, startFrame, stopping };
+    const request = { id: ++this._requestId, segment: this._segment, startFrame, stopping };
     this._request = request;
     this._dirty = false;
     this.engine.generate(context, targets).then((motion) => {
@@ -543,6 +565,7 @@ class G1Controller {
       this.onGenerated?.(motion.poses, targets);
     }).catch((e) => {
       this._request = null;
+      this._retryIn = 1;
       this.onError?.(e);
     });
   }
@@ -550,6 +573,10 @@ class G1Controller {
     const { request, poses } = this._pending;
     this._pending = null;
     const seg = this._segment;
+    if (request.segment !== seg) {
+      this._dirty = true;
+      return;
+    }
     let prefix;
     if (seg && request.startFrame >= 0) {
       const frames = [...seg.prefix, ...seg.poses];
@@ -586,6 +613,22 @@ const G1_BRICKS = {
     [0.3706, 0, 0.76923, 0.02229, 566e-5, 0.0366, 0.99907, 0.38521, -0.02289, 0.24802, 0.7865, 0.08637, -0.01123, -0.63147, -0.014, -0.18089, 0.24699, -0.30509, 0.04118, -0.32672, 0.0897, 0.08926, -0.36908, 0.74523, -0.46101, -0.99078, -0.06127, -0.13704, -0.08494, 1.0975, -0.5722, -0.04173, -0.54269, -0.14907, -0.13626, -0.04656]
   ]
 };
+const workerUrl = "" + new URL("motionbricks.worker.js", import.meta.url).href;
+class MotionBricksWorkerError extends Error {
+  constructor() {
+    super(...arguments);
+    this.name = "MotionBricksWorkerError";
+  }
+}
+function startWorker() {
+  const url = new URL(workerUrl, import.meta.url);
+  if (url.origin === location.origin) return new Worker(url, { type: "module" });
+  const blob = new Blob([`import ${JSON.stringify(url.href)}`], { type: "text/javascript" });
+  const blobUrl = URL.createObjectURL(blob);
+  const worker = new Worker(blobUrl, { type: "module" });
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1e4);
+  return worker;
+}
 class MotionBricksRemote {
   constructor(worker) {
     this.backend = "";
@@ -602,7 +645,7 @@ class MotionBricksRemote {
       else p.reject(new Error(m.message));
     };
     worker.onerror = (e) => {
-      const error = new Error(e.message || "The MotionBricks worker failed to start");
+      const error = new MotionBricksWorkerError(e.message || "The MotionBricks worker failed to start");
       for (const p of this._pending.values()) p.reject(error);
       this._pending.clear();
     };
@@ -615,15 +658,18 @@ class MotionBricksRemote {
     });
   }
   /**
-   * Start the worker and load the model in it. URLs are resolved against the page.
+   * Start the worker and load the model in it. URLs are resolved against the page. It throws a
+   * MotionBricksWorkerError when the worker cannot run, and the model's own error when the model fails to load.
    * @param worker a worker running MotionBricksWorker; the default is the one bundled with this package
    */
   static async Load(options, onProgress, worker) {
-    const remote = new MotionBricksRemote(worker ?? new Worker(new URL(
-      /* @vite-ignore */
-      "" + new URL("motionbricks.worker.js", import.meta.url).href,
-      import.meta.url
-    ), { type: "module" }));
+    let w = worker;
+    try {
+      w ??= startWorker();
+    } catch (e) {
+      throw new MotionBricksWorkerError(e instanceof Error ? e.message : String(e));
+    }
+    const remote = new MotionBricksRemote(w);
     const abs = (u) => new URL(u, location.href).href;
     try {
       const result = await remote._call({ type: "load", options: {
@@ -703,10 +749,14 @@ class MotionBricksCharacter {
   }
   /**
    * Load ONNX Runtime and the model, in a worker unless `worker: false`, and warm it up. The robot can be set
-   * before or after.
+   * before or after. Calling it again while loading waits for the same load.
    */
   async load(onProgress) {
     if (this.controller) return this;
+    this._loading ??= this._load(onProgress).finally(() => this._loading = void 0);
+    return this._loading;
+  }
+  async _load(onProgress) {
     const o = this.options;
     const ortUrl = o.ort ?? MOTIONBRICKS_DEFAULTS.ort;
     const model = o.model ?? MOTIONBRICKS_DEFAULTS.model;
@@ -717,19 +767,23 @@ class MotionBricksCharacter {
     let engine = null;
     if (o.worker !== false) {
       engine = await MotionBricksRemote.Load({ ort: ortUrl, wasm: o.wasm, model, sessionOptions }, progress).catch((e) => {
-        console.warn("MotionBricks: the worker could not load the model, running it on the page instead", e);
+        if (!(e instanceof MotionBricksWorkerError)) throw e;
+        console.warn("MotionBricks: the worker could not start, running the model on the page instead", e);
         return null;
       });
     }
-    if (!engine) {
-      const ort = await loadOrt(ortUrl, o.wasm);
-      engine = model.endsWith("/") ? await MotionBricksG1.LoadPacked(ort, model, sessionOptions, progress) : await MotionBricksG1.LoadOnnx(ort, model, sessionOptions, progress);
-    }
+    if (!engine) engine = await MotionBricksG1.Load(await loadOrt(ortUrl, o.wasm), model, sessionOptions, progress);
     onProgress?.("warmup", 0, 1);
     const rest = Float32Array.from((o.bricks ?? G1_BRICKS).rest[0]);
-    await engine.generate([rest, rest, rest, rest], [rest]);
+    try {
+      await engine.generate([rest, rest, rest, rest], [rest]);
+    } catch (e) {
+      if (engine instanceof MotionBricksRemote) engine.worker.terminate();
+      throw e;
+    }
     this.engine = engine;
-    const c = new G1Controller(engine, o.bricks ?? G1_BRICKS);
+    const p = this._lastPose;
+    const c = p ? new G1Controller(engine, o.bricks ?? G1_BRICKS, p[0], p[1], heading([p[3], p[4], p[5], p[6]])) : new G1Controller(engine, o.bricks ?? G1_BRICKS);
     c.gait = this.gait;
     c.onError = (e) => this.onError ? this.onError(e) : console.error("MotionBricks: generation failed", e);
     this.controller = c;
@@ -787,6 +841,7 @@ class MotionBricksCharacter {
   /** Come to a stop a short way ahead. */
   stop() {
     this._drive.active = false;
+    this._pendingGoal = null;
     this.controller?.stop();
   }
   /** The robot's ground position, in world space. */
@@ -807,8 +862,9 @@ class MotionBricksCharacter {
     const p = this.controller?.pose;
     return p ? heading([p[3], p[4], p[5], p[6]]) : 0;
   }
-  /** Stop the worker. The robot stays in the scene, and load() starts the model again. */
+  /** Stop the worker. The robot stays in the scene, and load() starts the model again from where it stands. */
   dispose() {
+    if (this.controller) this._lastPose = Float32Array.from(this.controller.pose);
     if (this.engine instanceof MotionBricksRemote) this.engine.worker.terminate();
     this.engine = void 0;
     this.controller = void 0;
@@ -819,14 +875,7 @@ async function loadOrt(url, wasm) {
     /* @vite-ignore */
     new URL(url, location.href).href
   );
-  ort.env.logLevel = "error";
-  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
-  if (wasm?.length) {
-    const parts = await Promise.all(wasm.map(async (u) => new Uint8Array(await (await fetch(u)).arrayBuffer())));
-    const binary = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-    parts.reduce((o, p) => (binary.set(p, o), o + p.length), 0);
-    ort.env.wasm.wasmBinary = binary.buffer;
-  }
+  await setupOrtWeb(ort, wasm);
   return ort;
 }
 export {
@@ -841,6 +890,7 @@ export {
   MotionBricksCharacter,
   MotionBricksG1,
   MotionBricksRemote,
+  MotionBricksWorkerError,
   POSE_SIZE,
   ROOT_SIZE,
   SAMPLE_RATE,
@@ -857,6 +907,7 @@ export {
   qrot,
   qslerp,
   qz,
+  setupOrtWeb,
   withSpeed
 };
 //# sourceMappingURL=index.mjs.map

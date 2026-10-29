@@ -66,6 +66,11 @@ export interface PackManifest {
     }[];
 }
 export type ProgressCallback = (loaded: number, total: number) => void;
+/**
+ * Quiet onnxruntime-web's logs, use up to four threads when the page is cross-origin isolated, and give it
+ * its .wasm file joined from `wasm` parts, for hosts that limit file size.
+ */
+export declare function setupOrtWeb(ort: any, wasm?: string[]): Promise<void>;
 /** Expand int8 blocks with fp16 scales into the fp32 external data the graph expects. */
 export declare function dequantizePack(manifest: PackManifest, q8: Uint8Array): Float32Array;
 export declare class MotionBricksG1 implements MotionGenerator {
@@ -80,6 +85,8 @@ export declare class MotionBricksG1 implements MotionGenerator {
      * @param baseUrl folder that holds pack.json, ending with a slash
      */
     static LoadPacked(ort: OrtApi, baseUrl: string, sessionOptions?: any, onProgress?: ProgressCallback): Promise<MotionBricksG1>;
+    /** Load a pack folder from tools/pack_model.py (a URL ending in /) or an original .onnx file. */
+    static Load(ort: OrtApi, model: string, sessionOptions?: any, onProgress?: ProgressCallback): Promise<MotionBricksG1>;
     /** Load an original MotionBricks G1 .onnx file, such as mmm_v6_g1_fp32.onnx. */
     static LoadOnnx(ort: OrtApi, url: string, sessionOptions?: any, onProgress?: ProgressCallback): Promise<MotionBricksG1>;
     /**

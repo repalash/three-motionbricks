@@ -32,6 +32,8 @@ export declare class G1Controller {
     private _requestId;
     private _dirty;
     private _pending;
+    /** Seconds to wait before generating on its own again, after a failed generation. */
+    private _retryIn;
     constructor(engine: MotionGenerator, bricks: G1Bricks, x?: number, y?: number, angle?: number);
     get moving(): boolean;
     get generating(): boolean;
@@ -46,6 +48,11 @@ export declare class G1Controller {
     moveTo(x: number, y: number, gait?: G1Gait): void;
     /** Come to a stop a short way ahead. */
     stop(): void;
+    /**
+     * Generate for the new goal now, or once the motion in flight is in place: a request's start frame
+     * belongs to the segment it was made from, so none is made while another waits to take over.
+     */
+    private _regenerate;
     /** Advance playback by dt seconds and update pose. */
     update(dt: number): void;
     private _latencyFrames;

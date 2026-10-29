@@ -57,6 +57,9 @@ export declare class MotionBricksCharacter {
     /** Called when a generation fails. */
     onError?: (e: unknown) => void;
     private _pendingGoal;
+    private _loading?;
+    /** Where the robot stood when the model was disposed, so a new load continues from there. */
+    private _lastPose?;
     private _drive;
     constructor(options?: MotionBricksCharacterOptions);
     /** The model is loaded and the robot responds to moveTo and drive. */
@@ -82,9 +85,10 @@ export declare class MotionBricksCharacter {
     setRobot(root: Object3D): G1Robot;
     /**
      * Load ONNX Runtime and the model, in a worker unless `worker: false`, and warm it up. The robot can be set
-     * before or after.
+     * before or after. Calling it again while loading waits for the same load.
      */
     load(onProgress?: (stage: LoadStage, loaded: number, total: number) => void): Promise<this>;
+    private _load;
     /** Advance the motion by dt seconds and pose the robot. Call it every frame. */
     update(dt: number): void;
     /** Convert a world point to the character's G1 ground coordinates. */
@@ -105,7 +109,7 @@ export declare class MotionBricksCharacter {
     getGoal(target?: Vector3): Vector3 | null;
     /** The direction the robot faces, as an angle around Y in the character's space (0 faces +X). */
     get heading(): number;
-    /** Stop the worker. The robot stays in the scene, and load() starts the model again. */
+    /** Stop the worker. The robot stays in the scene, and load() starts the model again from where it stands. */
     dispose(): void;
 }
 /** Import onnxruntime-web on the page, for when no worker is used. */
