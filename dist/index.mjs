@@ -521,11 +521,11 @@ class G1Controller {
     return Math.ceil(Math.max(s.averageInferenceMs || 400, s.lastInferenceMs) / 1e3 * SAMPLE_RATE) + 2;
   }
   /**
-   * Seconds of travel to the gait target. A segment lasts about that long, and the next one is generated while
-   * it plays, so it must outlast the inference with room to spare, or playback reaches its end first and waits.
+   * Frames before a gait segment's end where the next one takes over. A run keeps its natural cadence with 10, a
+   * walk with 2. Slow inference also gets 2 when running: more time to generate, for a slightly quicker cadence.
    */
-  get effectiveLead() {
-    return Math.min(Math.max(this.lead, (this._latencyFrames() + 10 + 8) / SAMPLE_RATE), 1.6);
+  _transitionEarly(gait) {
+    return gait === "run" && Math.max(this.stats.averageInferenceMs, this.stats.lastInferenceMs) < 600 ? 10 : 2;
   }
   _distanceToGoal() {
     return this.goal ? Math.hypot(this.goal[0] - this.pose[0], this.goal[1] - this.pose[1]) : 0;
@@ -556,7 +556,7 @@ class G1Controller {
     const angle = distance > 0.3 ? Math.atan2(dy, dx) : facing;
     let targets;
     let stopping;
-    const lead = this.effectiveLead;
+    const lead = this.lead;
     if (distance > speed * lead + 0.8) {
       const ahead = speed * lead;
       targets = placePoses(withSpeed(this.bricks[this.gait], speed), from[0] + Math.cos(angle) * ahead, from[1] + Math.sin(angle) * ahead, angle);
@@ -570,7 +570,7 @@ class G1Controller {
       targets = placePoses(this.bricks.rest, goal[0], goal[1], angle);
       stopping = true;
     }
-    const request = { id: ++this._requestId, segment: this._segment, startFrame, stopping };
+    const request = { id: ++this._requestId, segment: this._segment, startFrame, stopping, gait: this.gait };
     this._request = request;
     this._dirty = false;
     this.engine.generate(context, targets).then((motion) => {
@@ -616,7 +616,7 @@ class G1Controller {
     this._segment = {
       poses,
       prefix,
-      transitionEarly: request.stopping ? 0 : 10,
+      transitionEarly: request.stopping ? 0 : this._transitionEarly(request.gait),
       stopping: request.stopping
     };
   }
@@ -862,7 +862,7 @@ class MotionBricksCharacter {
     const [ox, oy] = G1Robot.ToG1(origin);
     const [dx, dy] = this._toG1(direction);
     const angle = Math.atan2(dy - oy, dx - ox);
-    const ahead = GAIT_SPEEDS[gait] * c.effectiveLead + 4;
+    const ahead = GAIT_SPEEDS[gait] * c.lead + 4;
     const goal = [c.pose[0] + Math.cos(angle) * ahead, c.pose[1] + Math.sin(angle) * ahead];
     const d = this._drive;
     const turn = Math.abs(Math.atan2(Math.sin(angle - d.angle), Math.cos(angle - d.angle)));

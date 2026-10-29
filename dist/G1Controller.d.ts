@@ -21,7 +21,10 @@ export declare class G1Controller {
     readonly pose: G1Pose;
     goal: [number, number] | null;
     gait: G1Gait;
-    /** Seconds of travel between the robot and its gait target, at least. Slow inference places it further. */
+    /**
+     * Seconds of travel between the robot and its gait target. The gait bricks were baked with 1 s, so the
+     * stride's phase at the target matches it; other values make the model squeeze or stretch steps to fit.
+     */
     lead: number;
     stats: G1ControllerStats;
     onGenerated?: (motion: G1Pose[], targets: G1Pose[]) => void;
@@ -64,10 +67,10 @@ export declare class G1Controller {
     update(dt: number): void;
     private _latencyFrames;
     /**
-     * Seconds of travel to the gait target. A segment lasts about that long, and the next one is generated while
-     * it plays, so it must outlast the inference with room to spare, or playback reaches its end first and waits.
+     * Frames before a gait segment's end where the next one takes over. A run keeps its natural cadence with 10, a
+     * walk with 2. Slow inference also gets 2 when running: more time to generate, for a slightly quicker cadence.
      */
-    get effectiveLead(): number;
+    private _transitionEarly;
     private _distanceToGoal;
     /** The frame of the current segment where new motion can start, and the four context poses ending there. */
     private _contextAt;
