@@ -1,0 +1,11 @@
+{
+    "entryPoints": ["src/index.ts"],
+    "name": "three-motionbricks",
+    "out": "docs",
+    "excludeExternals": true,
+    "readme": "README.md",
+    "externalSymbolLinkMappings": {
+        "three": {"*": "https://threejs.org/docs/"},
+        "@types/three": {"*": "https://threejs.org/docs/"}
+    }
+}
