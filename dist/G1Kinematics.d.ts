@@ -1,0 +1,2 @@
+export declare const G1_BODY_TREE: readonly [name: string, parent: string, position: [number, number, number], quaternion: [number, number, number, number]][];
+//# sourceMappingURL=G1Kinematics.d.ts.map

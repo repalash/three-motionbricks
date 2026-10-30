@@ -1,4 +1,4 @@
-import { Quaternion, Vector3, Group } from "three";
+import { Quaternion, Vector3, Group, Euler, Object3D } from "three";
 const G1_JOINT_NAMES = [
   "left_hip_pitch_joint",
   "left_hip_roll_joint",
@@ -426,6 +426,346 @@ class G1Robot {
     return target.set(x, z, -y);
   }
 }
+const G1_BODY_TREE = [
+  ["pelvis", "", [0, 0, 0.793], [0, 0, 0, 1]],
+  ["left_hip_pitch_link", "pelvis", [0, 0.064452, -0.1027], [0, 0, 0, 1]],
+  ["left_hip_roll_link", "left_hip_pitch_link", [0, 0.052, -0.030465], [0, -0.0873386, 0, 0.996179]],
+  ["left_hip_yaw_link", "left_hip_roll_link", [0.025001, 0, -0.12412], [0, 0, 0, 1]],
+  ["left_knee_link", "left_hip_yaw_link", [-0.078273, 21489e-7, -0.17734], [0, 0.0873386, 0, 0.996179]],
+  ["left_ankle_pitch_link", "left_knee_link", [0, -94445e-9, -0.30001], [0, 0, 0, 1]],
+  ["left_ankle_roll_link", "left_ankle_pitch_link", [0, 0, -0.017558], [0, 0, 0, 1]],
+  ["right_hip_pitch_link", "pelvis", [0, -0.064452, -0.1027], [0, 0, 0, 1]],
+  ["right_hip_roll_link", "right_hip_pitch_link", [0, -0.052, -0.030465], [0, -0.0873386, 0, 0.996179]],
+  ["right_hip_yaw_link", "right_hip_roll_link", [0.025001, 0, -0.12412], [0, 0, 0, 1]],
+  ["right_knee_link", "right_hip_yaw_link", [-0.078273, -21489e-7, -0.17734], [0, 0.0873386, 0, 0.996179]],
+  ["right_ankle_pitch_link", "right_knee_link", [0, 94445e-9, -0.30001], [0, 0, 0, 1]],
+  ["right_ankle_roll_link", "right_ankle_pitch_link", [0, 0, -0.017558], [0, 0, 0, 1]],
+  ["waist_yaw_link", "pelvis", [0, 0, 0], [0, 0, 0, 1]],
+  ["waist_roll_link", "waist_yaw_link", [-39635e-7, 0, 0.044], [0, 0, 0, 1]],
+  ["torso_link", "waist_roll_link", [0, 0, 0], [0, 0, 0, 1]],
+  ["left_shoulder_pitch_link", "torso_link", [39563e-7, 0.10022, 0.24778], [0.139201, 138722e-10, -986868e-10, 0.990264]],
+  ["left_shoulder_roll_link", "left_shoulder_pitch_link", [0, 0.038, -0.013831], [-0.139172, 0, 0, 0.990268]],
+  ["left_shoulder_yaw_link", "left_shoulder_roll_link", [0, 624e-5, -0.1032], [0, 0, 0, 1]],
+  ["left_elbow_link", "left_shoulder_yaw_link", [0.015783, 0, -0.080518], [0, 0, 0, 1]],
+  ["left_wrist_roll_link", "left_elbow_link", [0.1, 188791e-8, -0.01], [0, 0, 0, 1]],
+  ["left_wrist_pitch_link", "left_wrist_roll_link", [0.038, 0, 0], [0, 0, 0, 1]],
+  ["left_wrist_yaw_link", "left_wrist_pitch_link", [0.046, 0, 0], [0, 0, 0, 1]],
+  ["right_shoulder_pitch_link", "torso_link", [39563e-7, -0.10021, 0.24778], [-0.139201, 138722e-10, 986868e-10, 0.990264]],
+  ["right_shoulder_roll_link", "right_shoulder_pitch_link", [0, -0.038, -0.013831], [0.139172, 0, 0, 0.990268]],
+  ["right_shoulder_yaw_link", "right_shoulder_roll_link", [0, -624e-5, -0.1032], [0, 0, 0, 1]],
+  ["right_elbow_link", "right_shoulder_yaw_link", [0.015783, 0, -0.080518], [0, 0, 0, 1]],
+  ["right_wrist_roll_link", "right_elbow_link", [0.1, -188791e-8, -0.01], [0, 0, 0, 1]],
+  ["right_wrist_pitch_link", "right_wrist_roll_link", [0.038, 0, 0], [0, 0, 0, 1]],
+  ["right_wrist_yaw_link", "right_wrist_pitch_link", [0.046, 0, 0], [0, 0, 0, 1]]
+];
+const G1_PARTS = {
+  pelvis: "pelvis",
+  torso: "torso_link",
+  leftThigh: "left_hip_yaw_link",
+  leftShin: "left_knee_link",
+  leftFoot: "left_ankle_roll_link",
+  rightThigh: "right_hip_yaw_link",
+  rightShin: "right_knee_link",
+  rightFoot: "right_ankle_roll_link",
+  leftUpperArm: "left_shoulder_yaw_link",
+  leftForearm: "left_elbow_link",
+  leftHand: "left_wrist_yaw_link",
+  rightUpperArm: "right_shoulder_yaw_link",
+  rightForearm: "right_elbow_link",
+  rightHand: "right_wrist_yaw_link"
+};
+const LIMB_SEGMENTS = [
+  ["leftThigh", "leftShin"],
+  ["leftShin", "leftFoot"],
+  ["rightThigh", "rightShin"],
+  ["rightShin", "rightFoot"],
+  ["leftUpperArm", "leftForearm"],
+  ["leftForearm", "leftHand"],
+  ["rightUpperArm", "rightForearm"],
+  ["rightForearm", "rightHand"]
+];
+const MIXAMO = (prefix) => ({
+  pelvis: `${prefix}Hips`,
+  torso: `${prefix}Spine1`,
+  leftThigh: `${prefix}LeftUpLeg`,
+  leftShin: `${prefix}LeftLeg`,
+  leftFoot: `${prefix}LeftFoot`,
+  rightThigh: `${prefix}RightUpLeg`,
+  rightShin: `${prefix}RightLeg`,
+  rightFoot: `${prefix}RightFoot`,
+  leftUpperArm: `${prefix}LeftArm`,
+  leftForearm: `${prefix}LeftForeArm`,
+  leftHand: `${prefix}LeftHand`,
+  rightUpperArm: `${prefix}RightArm`,
+  rightForearm: `${prefix}RightForeArm`,
+  rightHand: `${prefix}RightHand`
+});
+const CHARACTER_RIGS = {
+  /** Mixamo skeletons in a T-pose facing -Z, such as Polygonal Mind's 100 Avatars (VRM 0). */
+  mixamo: {
+    label: "Mixamo skeleton",
+    bones: MIXAMO("mixamorig:"),
+    forward: "-z"
+  },
+  /** The same, facing +Z, as Mixamo exports to glTF. */
+  mixamoPlusZ: {
+    label: "Mixamo skeleton (+Z)",
+    bones: MIXAMO("mixamorig"),
+    forward: "+z"
+  },
+  /** Tomás Laulhé's RobotExpressive (Quaternius, CC0), from the three.js examples. */
+  robotExpressive: {
+    label: "RobotExpressive",
+    bones: {
+      pelvis: "Hips",
+      torso: "Abdomen",
+      leftThigh: "UpperLeg.L",
+      leftShin: "LowerLeg.L",
+      leftFoot: "Foot.L",
+      rightThigh: "UpperLeg.R",
+      rightShin: "LowerLeg.R",
+      rightFoot: "Foot.R",
+      leftUpperArm: "UpperArm.L",
+      leftForearm: "LowerArm.L",
+      rightUpperArm: "UpperArm.R",
+      rightForearm: "LowerArm.R"
+    },
+    root: "Body",
+    forward: "+z",
+    // Its feet are IK targets under the root: they follow the shins' ends, which also mark the ankles.
+    attach: { "Foot.L": "LowerLeg.L_end", "Foot.R": "LowerLeg.R_end" },
+    ends: { leftShin: "LowerLeg.L_end", rightShin: "LowerLeg.R_end", leftForearm: "Palm2.L", rightForearm: "Palm2.R" }
+  },
+  unitreeH1: {
+    label: "Unitree H1",
+    bones: {
+      pelvis: "pelvis",
+      torso: "torso_link",
+      leftThigh: "left_hip_pitch_link",
+      leftShin: "left_knee_link",
+      leftFoot: "left_ankle_link",
+      rightThigh: "right_hip_pitch_link",
+      rightShin: "right_knee_link",
+      rightFoot: "right_ankle_link",
+      leftUpperArm: "left_shoulder_yaw_link",
+      leftForearm: "left_elbow_link",
+      rightUpperArm: "right_shoulder_yaw_link",
+      rightForearm: "right_elbow_link"
+    },
+    forward: "+x",
+    // Like the G1, its zero pose has the forearms forward; it has no hand bodies to point them by.
+    rest: { left_elbow_link: [0, 0, -Math.PI / 2], right_elbow_link: [0, 0, -Math.PI / 2] }
+  },
+  boosterT1: {
+    label: "Booster T1",
+    bones: {
+      pelvis: "Waist",
+      torso: "Trunk",
+      leftThigh: "Hip_Yaw_Left",
+      leftShin: "Shank_Left",
+      leftFoot: "left_foot_link",
+      rightThigh: "Hip_Yaw_Right",
+      rightShin: "Shank_Right",
+      rightFoot: "right_foot_link",
+      leftUpperArm: "AL2",
+      leftForearm: "AL3",
+      leftHand: "left_hand_link",
+      rightUpperArm: "AR2",
+      rightForearm: "AR3",
+      rightHand: "right_hand_link"
+    },
+    root: "Trunk",
+    forward: "+x"
+  },
+  robotisOP3: {
+    label: "Robotis OP3",
+    bones: {
+      pelvis: "body_link",
+      leftThigh: "l_hip_pitch_link",
+      leftShin: "l_knee_link",
+      leftFoot: "l_ank_roll_link",
+      rightThigh: "r_hip_pitch_link",
+      rightShin: "r_knee_link",
+      rightFoot: "r_ank_roll_link",
+      leftUpperArm: "l_sho_roll_link",
+      leftForearm: "l_el_link",
+      rightUpperArm: "r_sho_roll_link",
+      rightForearm: "r_el_link"
+    },
+    forward: "+x"
+  }
+};
+function referencePose() {
+  const p = new Float32Array(POSE_SIZE);
+  p[2] = G1_BODY_TREE[0][2][2];
+  p[6] = 1;
+  p[7 + G1_JOINT_NAMES.indexOf("left_elbow_joint")] = Math.PI / 2;
+  p[7 + G1_JOINT_NAMES.indexOf("right_elbow_joint")] = Math.PI / 2;
+  return p;
+}
+function g1Skeleton() {
+  const root = new Group();
+  root.quaternion.setFromAxisAngle(new Vector3(1, 0, 0), -Math.PI / 2);
+  const nodes = {};
+  for (const [name, parent, position, quaternion] of G1_BODY_TREE) {
+    const node = new Object3D();
+    node.name = name;
+    node.position.set(...position);
+    node.quaternion.set(...quaternion);
+    (parent ? nodes[parent] : root).add(node);
+    nodes[name] = node;
+  }
+  return { root, robot: G1Robot.FromObject(root, { shadows: false }) };
+}
+function sanitize(name) {
+  return name.replace(/\s/g, "_").replace(/[\[\].:/]/g, "");
+}
+const tq = new Quaternion(), tq2 = new Quaternion(), tv = new Vector3(), tv2 = new Vector3();
+function depth(o) {
+  let n = 0;
+  for (let p = o.parent; p; p = p.parent) n++;
+  return n;
+}
+class RetargetedCharacter {
+  /**
+   * @param model the loaded model, such as `gltf.scene`
+   * @param rig one of CHARACTER_RIGS, or your own mapping
+   * @param matchSize scale the model so its legs match the G1's (default true); otherwise its steps slide
+   */
+  constructor(model, rig, { shadows = true, matchSize = true } = {}) {
+    this.object = new Group();
+    this._g1 = g1Skeleton();
+    this._parts = [];
+    this._pelvisRest = new Vector3();
+    this._g1PelvisRest = new Vector3();
+    this._attach = [];
+    this.model = model;
+    this.rig = rig;
+    const lookup = (name) => {
+      let node = model.getObjectByName(name);
+      const wanted = sanitize(name), bare = sanitize(name.replace(/^[^:]*:/, ""));
+      if (!node) model.traverse((o) => {
+        if (!node && sanitize(o.name) === wanted) node = o;
+      });
+      if (!node) model.traverse((o) => {
+        if (!node && sanitize(o.name) === bare) node = o;
+      });
+      return node;
+    };
+    const find = (name) => {
+      const node = lookup(name);
+      if (!node) throw new Error(`The ${rig.label} model has no node named ${name}`);
+      return node;
+    };
+    const holder = new Group();
+    holder.add(model);
+    this.object.add(holder);
+    model.updateMatrixWorld(true);
+    for (const [name, euler] of Object.entries(rig.rest ?? {})) {
+      const node = find(name);
+      const turn = tq.setFromEuler(new Euler(...euler));
+      const world = node.getWorldQuaternion(tq2).premultiply(turn);
+      node.quaternion.copy(node.parent.getWorldQuaternion(new Quaternion()).invert().multiply(world));
+      node.updateMatrixWorld(true);
+    }
+    const yaw = { "+x": 0, "-x": Math.PI, "+z": Math.PI / 2, "-z": -Math.PI / 2 }[rig.forward];
+    holder.quaternion.setFromAxisAngle(new Vector3(0, 1, 0), yaw);
+    this.object.updateMatrixWorld(true);
+    const g1 = this._g1;
+    g1.robot.setPose(referencePose());
+    g1.root.updateMatrixWorld(true);
+    const g1Part = (part) => g1.root.getObjectByName(G1_PARTS[part]);
+    const bones = rig.bones;
+    const nodes = {};
+    for (const part of Object.keys(G1_PARTS)) {
+      const name = bones[part];
+      if (!name) continue;
+      const node = lookup(name);
+      if (node) nodes[part] = node;
+      else if (/pelvis|Thigh|Shin/.test(part)) throw new Error(`The ${rig.label} model has no node named ${name}`);
+    }
+    if (rig.autoRest !== false) {
+      for (const [part, child] of LIMB_SEGMENTS) {
+        const node = nodes[part], endName = rig.ends?.[part];
+        const end = endName ? find(endName) : nodes[child];
+        if (!node || !end) continue;
+        const want = g1Part(child).getWorldPosition(tv).sub(g1Part(part).getWorldPosition(tv2)).normalize();
+        const have = this._localPosition(end, new Vector3()).sub(this._localPosition(node, new Vector3())).normalize();
+        const turn = new Quaternion().setFromUnitVectors(have, want);
+        const desired = this._localQuaternion(node, new Quaternion()).premultiply(turn);
+        const parentRotation = this._localQuaternion(node.parent, new Quaternion());
+        node.quaternion.copy(parentRotation.invert().multiply(desired));
+        node.updateMatrixWorld(true);
+      }
+    }
+    const legLength = (a, b) => a.getWorldPosition(tv).distanceTo(b.getWorldPosition(tv2));
+    let scale = 1;
+    const ankle = rig.ends?.leftShin ? find(rig.ends.leftShin) : nodes.leftFoot;
+    if (matchSize && nodes.leftThigh && ankle) {
+      const g1Leg = legLength(g1Part("leftThigh"), g1Part("leftFoot"));
+      scale = g1Leg / Math.max(1e-6, legLength(nodes.leftThigh, ankle));
+      holder.scale.setScalar(scale);
+      this.object.updateMatrixWorld(true);
+    }
+    this.scale = scale;
+    for (const part of Object.keys(nodes)) {
+      const node = nodes[part];
+      const g1Node = g1Part(part);
+      this._parts.push({ node, g1: g1Node, g1Rest: g1Node.getWorldQuaternion(new Quaternion()), rest: this._localQuaternion(node, new Quaternion()) });
+    }
+    this._parts.sort((a, b) => depth(a.node) - depth(b.node));
+    this._pelvis = nodes.pelvis;
+    this._root = rig.root ? find(rig.root) : this._pelvis;
+    this._g1Pelvis = g1.root.getObjectByName("pelvis");
+    this._localPosition(this._pelvis, this._pelvisRest);
+    this._g1Pelvis.getWorldPosition(this._g1PelvisRest);
+    for (const [name, target] of Object.entries(rig.attach ?? {})) this._attach.push([find(name), find(target)]);
+    const materials = /* @__PURE__ */ new Set();
+    model.traverse((o) => {
+      const mesh = o;
+      if (!mesh.isMesh) return;
+      mesh.castShadow = mesh.receiveShadow = shadows;
+      mesh.frustumCulled = false;
+      for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) materials.add(m);
+    });
+    this.materials = [...materials];
+  }
+  /** A node's rotation in the space of `object`. */
+  _localQuaternion(node, target) {
+    return node.getWorldQuaternion(target).premultiply(this.object.getWorldQuaternion(tq2).invert());
+  }
+  _localPosition(node, target) {
+    return this.object.worldToLocal(node.getWorldPosition(target));
+  }
+  /** Show a G1 pose: root XYZ, root XYZW quaternion, then the 29 joint angles. */
+  setPose(pose) {
+    const g1 = this._g1;
+    g1.robot.setPose(pose);
+    g1.root.updateMatrixWorld(true);
+    const objectRotation = this.object.getWorldQuaternion(new Quaternion());
+    for (const part of this._parts) {
+      const turn = part.g1.getWorldQuaternion(tq).multiply(tq2.copy(part.g1Rest).invert());
+      const desired2 = turn.multiply(part.rest);
+      const parentRotation = part.node.parent.getWorldQuaternion(tq2).premultiply(objectRotation.clone().invert());
+      part.node.quaternion.copy(parentRotation.invert().multiply(desired2));
+      part.node.updateMatrixWorld(true);
+    }
+    const g1Pelvis = this._g1Pelvis.getWorldPosition(tv);
+    const desired = tv2.set(g1Pelvis.x, this._pelvisRest.y + (g1Pelvis.y - this._g1PelvisRest.y), g1Pelvis.z);
+    const current = this._localPosition(this._pelvis, new Vector3());
+    const shift = desired.sub(current);
+    const root = this._root;
+    const parent = root.parent;
+    const a = this.object.localToWorld(new Vector3()), b = this.object.localToWorld(shift.clone());
+    const local = parent.worldToLocal(b).sub(parent.worldToLocal(a));
+    root.position.add(local);
+    root.updateMatrixWorld(true);
+    for (const [node, target] of this._attach) {
+      node.position.copy(node.parent.worldToLocal(target.getWorldPosition(tv)));
+      node.updateMatrixWorld(true);
+    }
+  }
+}
 const FADE_FRAMES = 8;
 const GAIT_SPEEDS = { walk: 1.13, run: 3.43 };
 class G1Controller {
@@ -726,13 +1066,25 @@ class MotionBricksRemote {
   }
 }
 const NVIDIA_ASSETS = "https://media.githubusercontent.com/media/NVlabs/motionbricks/main/motionbricks/assets";
+const ASSETS = "https://cdn.jsdelivr.net/gh/repalash/three-motionbricks@v0.2.0/assets/";
 const MOTIONBRICKS_DEFAULTS = {
   /** NVIDIA's original fp32 model, 730 MB. A pack from tools/pack_model.py is about 190 MB. */
   model: NVIDIA_ASSETS + "/onnx/unitree_g1/mmm_v6_g1_fp32.onnx",
+  /** This package's assets/ folder on jsDelivr: the robot and the other characters (see MOTIONBRICKS_CHARACTERS). */
+  assets: ASSETS,
   /** The robot, for your GLTFLoader: assets/unitree_g1.glb in this package (6 MB, BSD-3-Clause, Unitree). */
-  robot: "https://cdn.jsdelivr.net/gh/repalash/three-motionbricks@v0.1.0/assets/unitree_g1.glb",
+  robot: ASSETS + "unitree_g1.glb",
   ort: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.min.mjs"
 };
+const MOTIONBRICKS_CHARACTERS = [
+  { id: "g1", label: "Unitree G1", file: "unitree_g1.glb" },
+  { id: "h1", label: "Unitree H1", file: "robots/unitree_h1.glb", rig: "unitreeH1" },
+  { id: "t1", label: "Booster T1", file: "robots/booster_t1.glb", rig: "boosterT1" },
+  { id: "op3", label: "Robotis OP3", file: "robots/robotis_op3.glb", rig: "robotisOP3" },
+  { id: "robot-expressive", label: "RobotExpressive", file: "characters/robot_expressive.glb", rig: "robotExpressive" },
+  { id: "astronaut", label: "Astronaut", file: "characters/astronaut.glb", rig: "mixamo" },
+  { id: "polybot", label: "Polybot", file: "characters/polybot.glb", rig: "mixamo" }
+];
 const tempA = new Vector3();
 class MotionBricksCharacter {
   constructor(options = {}) {
@@ -777,6 +1129,18 @@ class MotionBricksCharacter {
     this.robot.setPose(this.controller?.pose ?? (this.options.bricks ?? G1_BRICKS).rest[0]);
     this.object.add(root);
     return this.robot;
+  }
+  /**
+   * Use another model, such as a robot from assets/robots or a character with a Mixamo skeleton: the G1's motion
+   * is retargeted to it with a rig from CHARACTER_RIGS (or your own). It replaces the current robot.
+   */
+  setCharacter(root, rig, options = {}) {
+    if (this.robot) this.object.remove(this.robot.object);
+    const character = new RetargetedCharacter(root, rig, { shadows: this.options.shadows ?? true, ...options });
+    this.robot = character;
+    character.setPose(this.controller?.pose ?? (this.options.bricks ?? G1_BRICKS).rest[0]);
+    this.object.add(character.object);
+    return character;
   }
   /**
    * Load ONNX Runtime and the model, in a worker unless `worker: false`, and warm it up. The robot can be set
@@ -912,13 +1276,17 @@ async function loadOrt(url, wasm) {
   return ort;
 }
 export {
+  CHARACTER_RIGS,
   DEFAULT_TOKEN_COUNTS,
   G1Controller,
   G1Robot,
+  G1_BODY_TREE,
   G1_BRICKS,
   G1_JOINT_BODIES,
   G1_JOINT_NAMES,
+  G1_PARTS,
   GAIT_SPEEDS,
+  MOTIONBRICKS_CHARACTERS,
   MOTIONBRICKS_DEFAULTS,
   MotionBricksCharacter,
   MotionBricksG1,
@@ -926,6 +1294,7 @@ export {
   MotionBricksWorkerError,
   POSE_SIZE,
   ROOT_SIZE,
+  RetargetedCharacter,
   SAMPLE_RATE,
   correctEndpoints,
   dequantizePack,

@@ -1,15 +1,57 @@
 import { Group, Object3D, Vector3 } from 'three';
 import { G1Robot } from './G1Robot';
+import { CharacterRig, RetargetedCharacter } from './RetargetedCharacter';
 import { G1Bricks, G1Controller, G1ControllerStats, G1Gait } from './G1Controller';
 import { MotionGenerator, OrtApi } from './MotionBricksG1';
 /** Where the model and ONNX Runtime load from when the options do not say, and where the robot model is. */
 export declare const MOTIONBRICKS_DEFAULTS: {
     /** NVIDIA's original fp32 model, 730 MB. A pack from tools/pack_model.py is about 190 MB. */
     model: string;
+    /** This package's assets/ folder on jsDelivr: the robot and the other characters (see MOTIONBRICKS_CHARACTERS). */
+    assets: string;
     /** The robot, for your GLTFLoader: assets/unitree_g1.glb in this package (6 MB, BSD-3-Clause, Unitree). */
     robot: string;
     ort: string;
 };
+/**
+ * The models in assets/: the G1 the motion is made for, and others it is retargeted to with a rig from
+ * CHARACTER_RIGS. Each `file` is relative to MOTIONBRICKS_DEFAULTS.assets.
+ */
+export declare const MOTIONBRICKS_CHARACTERS: readonly [{
+    readonly id: "g1";
+    readonly label: "Unitree G1";
+    readonly file: "unitree_g1.glb";
+}, {
+    readonly id: "h1";
+    readonly label: "Unitree H1";
+    readonly file: "robots/unitree_h1.glb";
+    readonly rig: "unitreeH1";
+}, {
+    readonly id: "t1";
+    readonly label: "Booster T1";
+    readonly file: "robots/booster_t1.glb";
+    readonly rig: "boosterT1";
+}, {
+    readonly id: "op3";
+    readonly label: "Robotis OP3";
+    readonly file: "robots/robotis_op3.glb";
+    readonly rig: "robotisOP3";
+}, {
+    readonly id: "robot-expressive";
+    readonly label: "RobotExpressive";
+    readonly file: "characters/robot_expressive.glb";
+    readonly rig: "robotExpressive";
+}, {
+    readonly id: "astronaut";
+    readonly label: "Astronaut";
+    readonly file: "characters/astronaut.glb";
+    readonly rig: "mixamo";
+}, {
+    readonly id: "polybot";
+    readonly label: "Polybot";
+    readonly file: "characters/polybot.glb";
+    readonly rig: "mixamo";
+}];
 export interface MotionBricksCharacterOptions {
     /** A folder with pack.json from tools/pack_model.py (ending in /), or an original MotionBricks G1 .onnx file. */
     model?: string;
@@ -50,7 +92,8 @@ export declare class MotionBricksCharacter {
     readonly options: MotionBricksCharacterOptions;
     /** Holds the robot. Move or scale it to place the character in your scene. */
     readonly object: Group<import('three').Object3DEventMap>;
-    robot?: G1Robot;
+    /** The model being posed: the G1 itself, or another model the motion is retargeted to. */
+    robot?: G1Robot | RetargetedCharacter;
     engine?: MotionGenerator;
     controller?: G1Controller;
     gait: G1Gait;
@@ -83,6 +126,13 @@ export declare class MotionBricksCharacter {
      * Load it with whatever loader your project uses.
      */
     setRobot(root: Object3D): G1Robot;
+    /**
+     * Use another model, such as a robot from assets/robots or a character with a Mixamo skeleton: the G1's motion
+     * is retargeted to it with a rig from CHARACTER_RIGS (or your own). It replaces the current robot.
+     */
+    setCharacter(root: Object3D, rig: CharacterRig, options?: {
+        matchSize?: boolean;
+    }): RetargetedCharacter;
     /**
      * Load ONNX Runtime and the model, in a worker unless `worker: false`, and warm it up. The robot can be set
      * before or after. Calling it again while loading waits for the same load.
