@@ -83,12 +83,12 @@ And when each foot is on the ground, recorded in Chromium in real time. The dott
 | `MotionBricksCharacter` | The robot, the model and the controller behind `moveTo`, `drive`, `stop` and `update`. |
 | `MotionBricksG1` | The engine: a port of NVIDIA's G1 runtime that prepares the ONNX inputs, decodes the output into world space, smooths the root and corrects the endpoints. It has no three.js dependency and runs in Node too. |
 | `MotionBricksRemote` | The engine in a Web Worker, behind the same `generate()` call. |
-| `G1Controller` | Point-to-point locomotion that generates each segment ahead of playback. |
+| `G1Controller` | Point-to-point locomotion that generates each segment ahead of playback. Each gait target is the pose of the stride the robot will be at when it arrives, from a left/right symmetric stride cycle, so the steps stay even. |
 | `G1Robot` | Poses a loaded G1 model from 36 joint coordinates. |
 
 The images here are rendered with [threepipe](https://github.com/repalash/threepipe) from poses recorded in the browser, in the White city scene of its [MotionBricks example](https://github.com/repalash/threepipe/tree/master/examples/motionbricks-g1).
 
-`tools/` holds the scripts that build the robot GLBs (`build_g1_glb.mjs`, and `build_robot_glb.mjs` for any MJCF), pack the model (`pack_model.py`, and `pack_lite.py` for phones), bake the gait targets (`make_bricks.py`), and the NumPy reference the engine was checked against (`motionbricks_ref.py`, to within 0.001°).
+`tools/` holds the scripts that build the robot GLBs (`build_g1_glb.mjs`, and `build_robot_glb.mjs` for any MJCF), pack the model (`pack_model.py`, and `pack_lite.py` for phones), bake the gait targets and stride cycles (`make_bricks.py`, `make_cycles.py`), and the NumPy reference the engine was checked against (`motionbricks_ref.py`, to within 0.001°).
 
 ## Development
 
@@ -111,4 +111,4 @@ npx serve _site
 
 ## Licenses
 
-The code is Apache 2.0. The MotionBricks ONNX models are under the [NVIDIA Open Model Agreement](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-agreement/), and the G1 description and meshes are Unitree's, under BSD-3-Clause (`assets/LICENSE-unitree.txt`). The gait targets in `G1Bricks.ts` are the model's own output, seeded from NVIDIA's sample clips.
+The code is Apache 2.0. The MotionBricks ONNX models are under the [NVIDIA Open Model Agreement](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-agreement/), and the G1 description and meshes are Unitree's, under BSD-3-Clause (`assets/LICENSE-unitree.txt`). The gait targets and stride cycles in `G1Bricks.ts` are the model's own output, seeded from NVIDIA's sample clips.

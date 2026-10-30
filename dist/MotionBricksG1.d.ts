@@ -4,6 +4,8 @@ export declare const G1_JOINT_NAMES: readonly ["left_hip_pitch_joint", "left_hip
 export declare const ROOT_SIZE = 7;
 export declare const POSE_SIZE: number;
 export declare const SAMPLE_RATE = 30;
+export declare const POSES_PER_TOKEN = 4;
+export declare const BOUNDARY_FRAMES: number;
 export declare const DEFAULT_TOKEN_COUNTS: number[];
 export type Quat = [number, number, number, number];
 export type Vec3 = [number, number, number];

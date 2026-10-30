@@ -162,6 +162,7 @@
     gait = g
     buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.gait === g)))
     if (g === 'stand') g1.stop()
+    if (g1.ready) status.textContent = {stand: 'Standing', walk: 'Walking', run: 'Running'}[g] + '. Drag to orbit.'
   }
   buttons.forEach(b => b.addEventListener('click', () => setGait(b.dataset.gait)))
 
@@ -173,7 +174,6 @@
     })
   }).then(() => {
     buttons.forEach(b => b.disabled = false)
-    status.textContent = 'Walking. Drag to orbit.'
     setGait(params.get('gait') === 'run' ? 'run' : 'walk')
   }).catch(e => {
     status.textContent = 'Could not start: ' + e.message

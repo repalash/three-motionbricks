@@ -5,6 +5,17 @@ export interface G1Bricks {
     /** Four consecutive frames of each gait, starting at the ground origin, travelling along +X. */
     walk: number[][];
     run: number[][];
+    /**
+     * One steady stride of each gait, footfall to the same foot's next footfall, starting at the ground origin and
+     * travelling along +X, with the ground travel over the whole stride. With these, gait targets are taken from the
+     * point of the stride the robot will reach when it gets there, so no step is squeezed or stretched to fit.
+     */
+    cycles?: Partial<Record<G1Gait, G1StrideCycle>>;
+}
+/** One stride of a gait: its frames from a footfall, and the ground travel over the whole stride. */
+export interface G1StrideCycle {
+    frames: number[][];
+    travel: number[];
 }
 export type G1Gait = 'walk' | 'run';
 export declare const GAIT_SPEEDS: Record<G1Gait, number>;
@@ -22,8 +33,9 @@ export declare class G1Controller {
     goal: [number, number] | null;
     gait: G1Gait;
     /**
-     * Seconds of travel between the robot and its gait target. The gait bricks were baked with 1 s, so the
-     * stride's phase at the target matches it; other values make the model squeeze or stretch steps to fit.
+     * Seconds of travel between the robot and its gait target. With stride cycles in the bricks, the target is
+     * the pose the stride reaches by then and the segment length is fixed to match. Without them, the single gait
+     * brick was baked with 1 s; other values make the model squeeze or stretch steps to fit.
      */
     lead: number;
     stats: G1ControllerStats;
@@ -67,8 +79,9 @@ export declare class G1Controller {
     update(dt: number): void;
     private _latencyFrames;
     /**
-     * Frames before a gait segment's end where the next one takes over. A run keeps its natural cadence with 10, a
-     * walk with 2. Slow inference also gets 2 when running: more time to generate, for a slightly quicker cadence.
+     * Frames before a gait segment's end where the next one takes over. With stride cycles, a run hands over 6
+     * frames early and a walk 2, so the hand-overs fall on alternate feet rather than always on the same step.
+     * Without them, a run keeps its cadence with 10. Slow inference gets 2: more time to generate.
      */
     private _transitionEarly;
     private _distanceToGoal;
