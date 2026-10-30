@@ -67,9 +67,10 @@ And when each foot is on the ground, recorded in Chromium in real time. The dott
 | --- | --- |
 | `model` | NVIDIA's original `mmm_v6_g1_fp32.onnx` (730 MB). A folder (ending in `/`) with a pack from `tools/pack_model.py` is about 190 MB. |
 | `liteModel`, `lite` | A pack from `tools/pack_lite.py` (194 MB), whose weights stay 8-bit in memory: the session settles near 0.5 GB instead of 1.5 GB or more, so it fits on phones; generation takes about 0.8 s on one thread instead of 0.5 s. `lite: 'auto'` (default) uses it on phones, tablets and devices with 4 GB or less. |
-| `ort` | onnxruntime-web 1.30.0 from jsDelivr. |
+| `ort` | onnxruntime-web 1.30.0 from jsDelivr: its WebAssembly-only build, or the WebGPU build for `backend: 'webgpu'`. |
 | `backend` | `'wasm'`. `'webgpu'` is for testing: with onnxruntime-web 1.30 it computes this model wrongly. |
 | `worker` | `true`. With `false` the model runs on the page and each generation stalls rendering. |
+| `cache` | `true`: model packs are kept in the browser's Cache Storage (`'three-motionbricks'`, or a name you give), so they download once rather than on every visit and page. A changed `pack.json` replaces the cached pack. `false` always downloads. |
 | `shadows` | `true`: the robot's meshes cast and receive shadows. |
 
 ## The robot

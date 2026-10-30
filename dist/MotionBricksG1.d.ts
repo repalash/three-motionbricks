@@ -86,6 +86,8 @@ export type ProgressCallback = (loaded: number, total: number) => void;
  * its .wasm file joined from `wasm` parts, for hosts that limit file size.
  */
 export declare function setupOrtWeb(ort: any, wasm?: string[]): Promise<void>;
+/** The Cache Storage name model packs are kept under, unless a load says otherwise. */
+export declare const MOTIONBRICKS_CACHE = "three-motionbricks";
 /** Expand int8 blocks with fp16 scales into the fp32 external data the graph expects. */
 export declare function dequantizePack(manifest: PackManifest, q8: Uint8Array): Float32Array;
 export declare class MotionBricksG1 implements MotionGenerator {
@@ -98,12 +100,17 @@ export declare class MotionBricksG1 implements MotionGenerator {
     /**
      * Load a model packed by tools/pack_model.py: a graph, a manifest, and int8 weight shards.
      * @param baseUrl folder that holds pack.json, ending with a slash
+     * @param cacheName Cache Storage to keep the pack in, so it downloads once per browser; false to always download
      */
-    static LoadPacked(ort: OrtApi, baseUrl: string, sessionOptions?: any, onProgress?: ProgressCallback): Promise<MotionBricksG1>;
+    static LoadPacked(ort: OrtApi, baseUrl: string, sessionOptions?: any, onProgress?: ProgressCallback, cacheName?: string | false): Promise<MotionBricksG1>;
+    private static _loadQ8;
     /** A pack from tools/pack_lite.py: the weights go to the session as they are, with no fp32 copy. */
     private static _loadLite;
-    /** Load a pack folder from tools/pack_model.py or tools/pack_lite.py (a URL ending in /), or an original .onnx file. */
-    static Load(ort: OrtApi, model: string, sessionOptions?: any, onProgress?: ProgressCallback): Promise<MotionBricksG1>;
+    /**
+     * Load a pack folder from tools/pack_model.py or tools/pack_lite.py (a URL ending in /), or an original .onnx
+     * file. Packs are kept in Cache Storage under `cacheName` (false: always download); .onnx files are not.
+     */
+    static Load(ort: OrtApi, model: string, sessionOptions?: any, onProgress?: ProgressCallback, cacheName?: string | false): Promise<MotionBricksG1>;
     /** Load an original MotionBricks G1 .onnx file, such as mmm_v6_g1_fp32.onnx. */
     static LoadOnnx(ort: OrtApi, url: string, sessionOptions?: any, onProgress?: ProgressCallback): Promise<MotionBricksG1>;
     /**

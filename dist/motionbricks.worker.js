@@ -98,8 +98,9 @@ async function setupOrtWeb(ort, wasm) {
   parts.reduce((offset, p) => (binary.set(p, offset), offset + p.length), 0);
   ort.env.wasm.wasmBinary = binary.buffer;
 }
-async function fetchBytes(url, onBytes, target, offset = 0) {
-  const res = await fetch(url);
+async function fetchBytes(url, onBytes, target, offset = 0, cache) {
+  const hit = cache ? await cache.match(url) : void 0;
+  const res = hit ?? await fetch(url);
   if (!res.ok || !res.body) throw new Error(`Could not download ${url}: HTTP ${res.status}`);
   const reader = res.body.getReader();
   const parts = [];
@@ -112,15 +113,70 @@ async function fetchBytes(url, onBytes, target, offset = 0) {
     size += value.length;
     onBytes?.(value.length);
   }
-  if (target) return target.subarray(offset, offset + size);
-  const out = new Uint8Array(size);
-  let o = 0;
-  for (const p of parts) {
-    out.set(p, o);
-    o += p.length;
+  let out;
+  if (target) out = target.subarray(offset, offset + size);
+  else {
+    out = new Uint8Array(size);
+    let o = 0;
+    for (const p of parts) {
+      out.set(p, o);
+      o += p.length;
+    }
   }
+  if (cache && !hit) cache.store(url, out);
   return out;
 }
+class PackCache {
+  constructor(_cache, _base) {
+    this._cache = _cache;
+    this._base = _base;
+    this._writes = Promise.resolve();
+  }
+  static async Open(name, base, manifestText) {
+    try {
+      if (typeof caches === "undefined") return null;
+      const cache = await caches.open(name);
+      const stored = await cache.match(base + "pack.json");
+      if (stored && await stored.text() !== manifestText) {
+        for (const key of await cache.keys()) if (key.url.startsWith(base)) await cache.delete(key);
+      }
+      return new PackCache(cache, base);
+    } catch {
+      return null;
+    }
+  }
+  async match(url) {
+    return this._cache.match(url).catch(() => void 0);
+  }
+  /**
+   * Store a downloaded file from the buffer it was read into, one at a time, rather than teeing the download:
+   * a tee holds whatever the disk has not taken yet, which on a phone can be the whole pack. A full disk only
+   * means it downloads again next time.
+   */
+  store(url, bytes) {
+    this._writes = this._writes.then(async () => this._cache.put(url, new Response(bytes)).catch(() => void 0));
+  }
+  /** Wait for the stores, before the weights are handed to the session and can be collected. */
+  async flush() {
+    return this._writes;
+  }
+  async complete(manifestText) {
+    await this._writes;
+    await this._cache.put(this._base + "pack.json", new Response(manifestText, { headers: [["content-type", "application/json"]] })).catch(() => void 0);
+  }
+}
+async function fetchManifest(base, cacheName) {
+  try {
+    const res = await fetch(base + "pack.json", { cache: "no-cache" });
+    if (res.ok) return await res.text();
+    throw new Error(`Could not download ${base}pack.json: HTTP ${res.status}`);
+  } catch (e) {
+    const stored = cacheName && typeof caches !== "undefined" ? await caches.open(cacheName).then(async (c) => c.match(base + "pack.json")).catch(() => void 0) : void 0;
+    if (stored) return stored.text();
+    throw e;
+  }
+}
+const MOTIONBRICKS_CACHE = "three-motionbricks";
 function halfToFloat(h) {
   const s = h & 32768 ? -1 : 1;
   const e = h >> 10 & 31;
@@ -154,10 +210,17 @@ class MotionBricksG1 {
   /**
    * Load a model packed by tools/pack_model.py: a graph, a manifest, and int8 weight shards.
    * @param baseUrl folder that holds pack.json, ending with a slash
+   * @param cacheName Cache Storage to keep the pack in, so it downloads once per browser; false to always download
    */
-  static async LoadPacked(ort, baseUrl, sessionOptions = {}, onProgress) {
-    const manifest = await (await fetch(baseUrl + "pack.json")).json();
-    if (manifest.format === "motionbricks-external") return MotionBricksG1._loadLite(ort, baseUrl, manifest, sessionOptions, onProgress);
+  static async LoadPacked(ort, baseUrl, sessionOptions = {}, onProgress, cacheName = MOTIONBRICKS_CACHE) {
+    const manifestText = await fetchManifest(baseUrl, cacheName);
+    const manifest = JSON.parse(manifestText);
+    const cache = cacheName ? await PackCache.Open(cacheName, baseUrl, manifestText) : null;
+    const engine2 = manifest.format === "motionbricks-external" ? await MotionBricksG1._loadLite(ort, baseUrl, manifest, sessionOptions, onProgress, cache) : await MotionBricksG1._loadQ8(ort, baseUrl, manifest, sessionOptions, onProgress, cache);
+    await cache?.complete(manifestText);
+    return engine2;
+  }
+  static async _loadQ8(ort, baseUrl, manifest, sessionOptions, onProgress, cache) {
     if (manifest.format !== "motionbricks-q8") throw new Error("Unknown model pack format");
     let loaded = 0;
     const total = manifest.q8Length;
@@ -167,9 +230,10 @@ class MotionBricksG1 {
     };
     const q8 = new Uint8Array(manifest.q8Length);
     const [graph] = await Promise.all([
-      fetchBytes(baseUrl + (manifest.graph ?? "graph.onnx")),
-      ...manifest.shards.map(async (s, i) => fetchBytes(baseUrl + s, count, q8, i * manifest.shardBytes))
+      fetchBytes(baseUrl + (manifest.graph ?? "graph.onnx"), void 0, void 0, 0, cache),
+      ...manifest.shards.map(async (s, i) => fetchBytes(baseUrl + s, count, q8, i * manifest.shardBytes, cache))
     ]);
+    await cache?.flush();
     const weights = dequantizePack(manifest, q8);
     return MotionBricksG1._create(ort, graph, {
       ...sessionOptions,
@@ -177,14 +241,15 @@ class MotionBricksG1 {
     });
   }
   /** A pack from tools/pack_lite.py: the weights go to the session as they are, with no fp32 copy. */
-  static async _loadLite(ort, baseUrl, manifest, sessionOptions, onProgress) {
+  static async _loadLite(ort, baseUrl, manifest, sessionOptions, onProgress, cache) {
     let loaded = 0;
     const count = (n) => onProgress?.(loaded += n, manifest.bytes);
     const data = new Uint8Array(manifest.bytes);
     const [graph] = await Promise.all([
-      fetchBytes(baseUrl + manifest.graph),
-      ...manifest.shards.map(async (s, i) => fetchBytes(baseUrl + s, count, data, i * manifest.shardBytes))
+      fetchBytes(baseUrl + manifest.graph, void 0, void 0, 0, cache),
+      ...manifest.shards.map(async (s, i) => fetchBytes(baseUrl + s, count, data, i * manifest.shardBytes, cache))
     ]);
+    await cache?.flush();
     return MotionBricksG1._create(ort, graph, {
       enableCpuMemArena: false,
       enableMemPattern: false,
@@ -192,9 +257,12 @@ class MotionBricksG1 {
       externalData: [{ path: manifest.weights, data }]
     });
   }
-  /** Load a pack folder from tools/pack_model.py or tools/pack_lite.py (a URL ending in /), or an original .onnx file. */
-  static async Load(ort, model, sessionOptions = {}, onProgress) {
-    return model.endsWith("/") ? MotionBricksG1.LoadPacked(ort, model, sessionOptions, onProgress) : MotionBricksG1.LoadOnnx(ort, model, sessionOptions, onProgress);
+  /**
+   * Load a pack folder from tools/pack_model.py or tools/pack_lite.py (a URL ending in /), or an original .onnx
+   * file. Packs are kept in Cache Storage under `cacheName` (false: always download); .onnx files are not.
+   */
+  static async Load(ort, model, sessionOptions = {}, onProgress, cacheName = MOTIONBRICKS_CACHE) {
+    return model.endsWith("/") ? MotionBricksG1.LoadPacked(ort, model, sessionOptions, onProgress, cacheName) : MotionBricksG1.LoadOnnx(ort, model, sessionOptions, onProgress);
   }
   /** Load an original MotionBricks G1 .onnx file, such as mmm_v6_g1_fp32.onnx. */
   static async LoadOnnx(ort, url, sessionOptions = {}, onProgress) {
@@ -342,7 +410,7 @@ async function load(id, o) {
     last = now;
     scope.postMessage({ id, type: "progress", loaded, total });
   };
-  engine = await MotionBricksG1.Load(ort, o.model, o.sessionOptions, progress);
+  engine = await MotionBricksG1.Load(ort, o.model, o.sessionOptions, progress, o.cache);
   return { backend: engine.backend };
 }
 scope.onmessage = async (e) => {

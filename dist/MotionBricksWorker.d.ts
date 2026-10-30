@@ -7,6 +7,8 @@ export interface WorkerLoadOptions {
     /** Absolute URL: a folder with pack.json (ending in /) or a .onnx file. */
     model: string;
     sessionOptions: any;
+    /** Cache Storage name for model packs, or false to always download. */
+    cache?: string | false;
 }
 export type WorkerRequest = {
     id: number;

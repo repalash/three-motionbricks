@@ -11,7 +11,10 @@ export declare const MOTIONBRICKS_DEFAULTS: {
     assets: string;
     /** The robot, for your GLTFLoader: assets/unitree_g1.glb in this package (6 MB, BSD-3-Clause, Unitree). */
     robot: string;
+    /** onnxruntime-web's WebAssembly-only build: half the size of the full one, and what the default backend uses. */
     ort: string;
+    /** The build with WebGPU, for `backend: 'webgpu'`. */
+    ortWebGpu: string;
 };
 /**
  * The models in assets/: the G1 the motion is made for, and others it is retargeted to with a rig from
@@ -62,7 +65,7 @@ export interface MotionBricksCharacterOptions {
     liteModel?: string;
     /** Use `liteModel`: always, never, or 'auto' (default) on phones, tablets and devices with 4 GB or less. */
     lite?: boolean | 'auto';
-    /** The onnxruntime-web module to import. */
+    /** The onnxruntime-web module to import. The default is MOTIONBRICKS_DEFAULTS.ort, or ortWebGpu for WebGPU. */
     ort?: string;
     /** Parts of the ORT .wasm file, joined in order, for hosts that limit file size. */
     wasm?: string[];
@@ -73,6 +76,11 @@ export interface MotionBricksCharacterOptions {
     backend?: 'wasm' | 'webgpu';
     /** Run the model in a Web Worker (default true). On the page, every generation stalls rendering. */
     worker?: boolean;
+    /**
+     * Keep model packs in the browser's Cache Storage, so they download once rather than on every visit and
+     * page (default true). A string names the cache; the default is MOTIONBRICKS_CACHE.
+     */
+    cache?: boolean | string;
     /** Make the robot's meshes cast and receive shadows. Default true. */
     shadows?: boolean;
     /** Standing, walk and run target poses. The default ones are baked from the model. */
