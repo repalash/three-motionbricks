@@ -1,6 +1,10 @@
 # three-motionbricks
 
+![The Unitree G1 running down a red lane through a white block city](docs/hero.jpg)
+
 [NVIDIA MotionBricks](https://github.com/NVlabs/motionbricks) for three.js: a Unitree G1 robot that walks and runs where you send it, with every frame of its motion generated in the browser by the model. No animation clips play at runtime.
+
+<p align="center"><img src="docs/run.webp" width="640" alt="The robot running, with the camera following it"></p>
 
 It needs only `three`, and works with any three.js setup (plain three.js, react-three-fiber, [threepipe](https://github.com/repalash/threepipe)). ONNX Runtime Web is imported at runtime from a URL, and the model runs in a Web Worker, so inference never stalls rendering.
 
@@ -41,6 +45,22 @@ g1.update(clock.getDelta())
 
 `example/index.html` is a complete plain three.js page: click the floor, or drive with WASD.
 
+## Motion, frame by frame
+
+The model is given four recent poses and a target pose, and fills in 0.6 to 1.9 s of motion between them. The controller asks for the next stretch while the current one plays, from frames that are already planned, so the new motion takes over without a seam.
+
+A chronophotograph, after Étienne-Jules Marey: the robot every 0.2 s of one run, laid on a single plate.
+
+![Exposures of the robot running left to right on one image](docs/chronophotograph.jpg)
+
+A plate after Eadweard Muybridge's *Animal Locomotion*: 24 consecutive frames, 1/30 s apart, as the model generated them.
+
+![24 numbered frames of the running robot in a grid](docs/stride-plate.jpg)
+
+And when each foot is on the ground, recorded in Chromium in real time. The dotted lines are where each newly generated segment took over; the gait runs through them.
+
+![Gait diagram: stance bars for the left and right foot while running and walking, with segment switches](docs/gait.png)
+
 ## Options
 
 | Option | Default |
@@ -64,6 +84,8 @@ g1.update(clock.getDelta())
 | `MotionBricksRemote` | The engine in a Web Worker, behind the same `generate()` call. |
 | `G1Controller` | Point-to-point locomotion that generates each segment ahead of playback. |
 | `G1Robot` | Poses a loaded G1 model from 36 joint coordinates. |
+
+The images here are rendered with [threepipe](https://github.com/repalash/threepipe) from poses recorded in the browser, in the White city scene of its [MotionBricks example](https://github.com/repalash/threepipe/tree/master/examples/motionbricks-g1).
 
 `tools/` holds the scripts that build the robot GLB (`build_g1_glb.mjs`), pack the model (`pack_model.py`), bake the gait targets (`make_bricks.py`), and the NumPy reference the engine was checked against (`motionbricks_ref.py`, to within 0.001°).
 
