@@ -100,6 +100,15 @@ npm run serve     # opens example/
 
 `dist/` is committed so tagged versions load from jsDelivr's GitHub CDN.
 
+The GitHub Pages site comes from `site/`: the landing page, the Seven bodies world (`site/bodies/`), and the White city world, whose `site/city/app.js` is [threepipe's motionbricks-g1 example](https://github.com/repalash/threepipe/tree/master/examples/motionbricks-g1) bundled with esbuild. `.github/workflows/pages.yml` packs the model both ways and runs `tools/build_site.sh`, which also adds the plain example. To try it locally, pack the model into `_site/model/` and `_site/model-lite/` and serve `_site/`:
+
+```bash
+npm run build && tools/build_site.sh
+python tools/pack_model.py mmm_v6_g1_fp32.onnx _site/model
+python tools/pack_lite.py mmm_v6_g1_fp32.onnx _site/model-lite
+npx serve _site
+```
+
 ## Licenses
 
 The code is Apache 2.0. The MotionBricks ONNX models are under the [NVIDIA Open Model Agreement](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-agreement/), and the G1 description and meshes are Unitree's, under BSD-3-Clause (`assets/LICENSE-unitree.txt`). The gait targets in `G1Bricks.ts` are the model's own output, seeded from NVIDIA's sample clips.

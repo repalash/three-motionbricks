@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>White city · three-motionbricks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@400;500;600&display=swap">
+<style>
+  /* Layout: a full-bleed 3D viewport with one instrument panel docked top-left (bottom sheet on phones). */
+  :root {
+    --scene-bg: #e4e7ea;      /* read by the 3D scene */
+    --scene-ground: #d9dde1;
+    --scene-grid: #aeb6bf;
+    --panel: rgba(250, 251, 252, 0.9);
+    --panel-edge: rgba(36, 48, 61, 0.14);
+    --ink: #17202a;
+    --ink-soft: #55616d;
+    --ink-faint: #8a949e;
+    --accent: #e8590c;        /* signal orange: goal marker, progress, playhead */
+    --accent-ink: #ffffff;
+    --control: #eef1f4;
+    --control-on: #17202a;
+    --control-on-ink: #f5f7f9;
+    --danger: #c92a2a;
+    --font-display: "Chakra Petch", "IBM Plex Sans", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --scene-bg: #14181d; --scene-ground: #1b2026; --scene-grid: #39424c;
+      --panel: rgba(24, 29, 35, 0.9); --panel-edge: rgba(210, 222, 235, 0.12);
+      --ink: #e8edf2; --ink-soft: #a3aeb9; --ink-faint: #707b86;
+      --accent: #ff7a2e; --accent-ink: #14181d;
+      --control: #262d35; --control-on: #e8edf2; --control-on-ink: #14181d;
+      --danger: #ff6b6b;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --scene-bg: #14181d; --scene-ground: #1b2026; --scene-grid: #39424c;
+    --panel: rgba(24, 29, 35, 0.9); --panel-edge: rgba(210, 222, 235, 0.12);
+    --ink: #e8edf2; --ink-soft: #a3aeb9; --ink-faint: #707b86;
+    --accent: #ff7a2e; --accent-ink: #14181d;
+    --control: #262d35; --control-on: #e8edf2; --control-on-ink: #14181d;
+    --danger: #ff6b6b;
+    color-scheme: dark;
+  }
+
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--scene-bg);
+    color: var(--ink);
+    font: 14px/1.45 var(--font-body);
+    overflow: hidden;
+  }
+  #stage { position: fixed; inset: 0; }
+  #mcanvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+
+  #mb-panel {
+    position: fixed;
+    top: calc(16px + env(safe-area-inset-top, 0px));
+    left: max(16px, env(safe-area-inset-left, 0px));
+    width: 316px;
+    max-width: calc(100% - 32px);
+    box-sizing: border-box;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: 10px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 8px 28px rgba(10, 16, 24, 0.12);
+  }
+  header { display: flex; flex-direction: column; gap: 2px; position: relative; }
+  #mb-more { display: none; }
+  h1 {
+    margin: 0;
+    font: 600 22px/1.1 var(--font-display);
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+  }
+  .kicker {
+    font: 500 11px/1.3 var(--font-data);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .status { display: flex; flex-direction: column; gap: 6px; }
+  #mb-status { font-size: 13px; color: var(--ink-soft); min-height: 1.45em; }
+  #mb-status[data-state="ready"] { color: var(--ink); }
+  #mb-status[data-state="error"] { color: var(--danger); }
+  #mb-progress {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--control);
+    overflow: hidden;
+  }
+  #mb-progress::before {
+    content: "";
+    display: block;
+    height: 100%;
+    width: calc(var(--progress, 0) * 100%);
+    background: var(--accent);
+    transition: width 0.2s linear;
+  }
+
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  .segmented { display: inline-flex; padding: 2px; border-radius: 7px; background: var(--control); }
+  button {
+    font: 500 13px/1 var(--font-body);
+    color: var(--ink);
+    background: var(--control);
+    border: 0;
+    border-radius: 6px;
+    padding: 8px 12px;
+    cursor: pointer;
+  }
+  .segmented button { background: transparent; padding: 7px 12px; }
+  button[aria-pressed="true"] { background: var(--control-on); color: var(--control-on-ink); }
+  button:hover { filter: brightness(0.96); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #mb-wander::before, #mb-fx::before {
+    content: "";
+    display: inline-block;
+    width: 7px; height: 7px;
+    margin-right: 7px;
+    border-radius: 50%;
+    background: var(--ink-faint);
+    vertical-align: 1px;
+  }
+  #mb-wander[aria-pressed="true"]::before, #mb-fx[aria-pressed="true"]::before { background: var(--accent); }
+  .style-pick { display: flex; align-items: center; gap: 10px; font: 500 10.5px/1.3 var(--font-data); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+  .style-pick select { flex: 1; min-width: 0; font: 500 13px/1.2 var(--font-body); color: var(--ink); background: var(--control); border: 0; border-radius: 6px; padding: 7px 8px; letter-spacing: 0; text-transform: none; }
+  kbd {
+    font: 500 11px/1 var(--font-data);
+    padding: 2px 5px;
+    border-radius: 4px;
+    border: 1px solid var(--panel-edge);
+    background: var(--control);
+    color: var(--ink);
+  }
+
+  .readout {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
+    margin: 0;
+  }
+  .readout div { min-width: 0; }
+  .readout dt { font: 500 10.5px/1.3 var(--font-data); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+  .readout dd { margin: 2px 0 0; font: 500 14px/1.3 var(--font-data); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .segment { display: flex; flex-direction: column; gap: 6px; }
+  .segment-label { display: flex; justify-content: space-between; font: 500 10.5px/1.3 var(--font-data); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+  #mb-timeline {
+    --played: 0; --transition: 1; --tokens: 11;
+    position: relative;
+    height: 14px;
+    border-radius: 3px;
+    background:
+      repeating-linear-gradient(90deg, transparent 0 calc(100% / var(--tokens) - 2px), var(--panel) calc(100% / var(--tokens) - 2px) calc(100% / var(--tokens))),
+      linear-gradient(90deg, var(--ink-soft) calc(var(--played) * 100%), var(--control) 0);
+    opacity: 0.35;
+    transition: opacity 0.3s;
+  }
+  #mb-timeline[data-active="true"] { opacity: 1; }
+  #mb-timeline::after {
+    content: "";
+    position: absolute;
+    top: -3px; bottom: -3px;
+    left: calc(var(--transition) * 100%);
+    width: 2px;
+    background: var(--accent);
+  }
+
+  .handoff::before { content: ""; display: inline-block; width: 2px; height: 9px; margin-right: 6px; background: var(--accent); vertical-align: -1px; }
+  .hint { margin: 0; font-size: 13px; color: var(--ink-soft); }
+  .hint b { color: var(--ink); font-weight: 600; }
+  footer { font-size: 11.5px; line-height: 1.45; color: var(--ink-faint); border-top: 1px solid var(--panel-edge); padding-top: 10px; }
+  footer a { color: inherit; }
+
+  /* Phones: a compact bottom sheet, and the 3D view ends where it begins, so the robot is never under it. */
+  @media (max-width: 560px) {
+    #stage { bottom: var(--sheet, 0px); }
+    #mb-panel {
+      top: auto;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      width: auto;
+      max-width: none;
+      max-height: 62vh;
+      overflow-y: auto;
+      padding: 10px max(14px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px));
+      gap: 9px;
+      border-radius: 14px 14px 0 0;
+      border-width: 1px 0 0;
+      box-shadow: 0 -6px 24px rgba(10, 16, 24, 0.10);
+    }
+    .kicker { display: none; }
+    header { flex-direction: row; align-items: baseline; gap: 10px; padding-right: 72px; }
+    h1 { font-size: 17px; }
+    #mb-more {
+      display: block;
+      position: absolute;
+      right: 0;
+      top: -2px;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+    .status { gap: 4px; }
+    #mb-status { font-size: 12px; min-height: 0; }
+    .controls { gap: 6px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .controls button { padding: 7px 10px; white-space: nowrap; }
+    .segmented button { padding: 6px 10px; }
+    .readout { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+    .readout dd { font-size: 12px; }
+    .hint { font-size: 12px; }
+    .segment, footer { display: none; }
+    #mb-panel:not(.open) .style-pick:has(#mb-style),
+    #mb-panel:not(.open) .readout,
+    #mb-panel:not(.open) .hint { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #mb-progress::before, #mb-timeline { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="stage"><canvas id="mcanvas" tabindex="0" aria-label="3D view of the Unitree G1 robot. Click the floor to send it there, or drive it with W, A, S and D."></canvas></div>
+
+<section id="mb-panel" aria-label="MotionBricks controls">
+  <header>
+    <span class="kicker">NVIDIA MotionBricks &middot; in your browser</span>
+    <h1>MotionBricks G1</h1>
+    <button id="mb-more" type="button" aria-expanded="false" aria-controls="mb-panel">More</button>
+  </header>
+
+  <div class="status" role="status" aria-live="polite">
+    <div id="mb-status" data-state="loading">Starting&hellip;</div>
+    <div id="mb-progress"></div>
+  </div>
+
+  <div class="controls">
+    <div class="segmented" role="group" aria-label="Gait">
+      <button id="mb-walk" type="button" aria-pressed="true">Walk</button>
+      <button id="mb-run" type="button" aria-pressed="false">Run</button>
+    </div>
+    <button id="mb-wander" type="button" aria-pressed="true">Wander</button>
+    <button id="mb-fx" type="button" aria-pressed="true" title="Screen-space reflections, GI, contact shadows, TAA and bloom">Effects</button>
+    <button id="mb-stop" type="button">Stop</button>
+  </div>
+  <label class="style-pick"><span>Robot</span><select id="mb-character" aria-label="Robot or character"></select></label>
+  <label class="style-pick"><span>Scene</span><select id="mb-style" aria-label="Scene style"></select></label>
+
+  <dl class="readout">
+    <div><dt>Backend</dt><dd id="mb-backend">&ndash;</dd></div>
+    <div><dt>Inference</dt><dd id="mb-latency">&ndash;</dd></div>
+    <div><dt>Segment</dt><dd id="mb-tokens">&ndash;</dd></div>
+    <div><dt>Generations</dt><dd id="mb-count">0</dd></div>
+  </dl>
+
+  <div class="segment">
+    <div class="segment-label"><span>Playing segment</span><span class="handoff">Next takes over</span></div>
+    <div id="mb-timeline" data-active="false"></div>
+  </div>
+
+  <p class="hint"><b>Click the floor</b> to send the robot there, or drive it with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> and hold <kbd>Shift</kbd> to run. Drag to orbit, scroll to zoom.</p>
+
+  <footer>
+    Every step comes from the 195M-parameter MotionBricks G1 model running locally in ONNX Runtime Web: 4 recent poses plus a target in, 0.6&ndash;1.9 s of 30 Hz motion out. Model under the NVIDIA Open Model Agreement. Viewer: threepipe.
+  </footer>
+</section>
+
+<script>
+  // On phones the sheet's height sets where the 3D view ends; it changes when the sheet opens or wraps.
+  ;(() => {
+    const panel = document.getElementById('mb-panel')
+    const more = document.getElementById('mb-more')
+    const fit = () => document.documentElement.style.setProperty('--sheet', panel.offsetHeight + 'px')
+    new ResizeObserver(fit).observe(panel)
+    fit()
+    more.addEventListener('click', () => {
+      const open = panel.classList.toggle('open')
+      more.setAttribute('aria-expanded', String(open))
+      more.textContent = open ? 'Less' : 'More'
+    })
+  })()
+  // app.js is examples/motionbricks-g1 from threepipe, bundled (see ../README.md). The model packs are built by the
+  // Pages workflow: model/ for desktops, model-lite/ (8-bit in memory) for phones and low-memory devices.
+  window.MOTIONBRICKS_CONFIG = {
+    model: '../model/',
+    liteModel: '../model-lite/',
+    robot: '../assets/unitree_g1.glb',
+    assetBase: '../assets/',
+    style: 'city',
+  }
+</script>
+<script src="../switcher.js" data-current="city"></script>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

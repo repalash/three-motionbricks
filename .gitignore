@@ -1,6 +1,7 @@
 node_modules
-docs
+docs/api/
 *.log
 .DS_Store
 example/_pack
 __pycache__/
+_site/

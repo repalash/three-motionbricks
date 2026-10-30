@@ -1,0 +1,73 @@
+# Builds the site (tools/build_site.sh) with both model packs and publishes it to GitHub Pages.
+# In the repository settings, Pages > Build and deployment > Source must be "GitHub Actions".
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The packs only change with the packing scripts, so they are cached on them; NVIDIA's 730 MB model is
+      # downloaded only when they change.
+      - name: Restore the model packs
+        id: packs
+        uses: actions/cache@v4
+        with:
+          path: packs
+          key: packs-${{ hashFiles('tools/pack_model.py', 'tools/pack_lite.py') }}
+
+      - uses: actions/setup-python@v5
+        if: steps.packs.outputs.cache-hit != 'true'
+        with:
+          python-version: '3.13'
+
+      - name: Pack the model
+        if: steps.packs.outputs.cache-hit != 'true'
+        run: |
+          pip install onnx==1.23.2 onnxruntime==1.31.1 numpy==2.5.4
+          curl -fL --retry 3 -o mmm_v6_g1_fp32.onnx \
+            https://media.githubusercontent.com/media/NVlabs/motionbricks/main/motionbricks/assets/onnx/unitree_g1/mmm_v6_g1_fp32.onnx
+          python tools/pack_model.py mmm_v6_g1_fp32.onnx packs/model
+          python tools/pack_lite.py mmm_v6_g1_fp32.onnx packs/model-lite
+          rm mmm_v6_g1_fp32.onnx
+
+      - name: Build the site
+        run: |
+          tools/build_site.sh _site
+          cp -R packs/model packs/model-lite _site/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

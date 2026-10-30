@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>three-motionbricks</title>
+<meta name="description" content="NVIDIA MotionBricks in three.js: a 195M-parameter motion model that walks and runs a robot, live in the browser.">
+<meta property="og:title" content="three-motionbricks">
+<meta property="og:description" content="A robot built out of motion bricks. NVIDIA MotionBricks in three.js, running in your browser.">
+<meta property="og:image" content="img/hero.jpg">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 20'%3E%3Cpolygon points='9,1 17,5.5 9,10 1,5.5' fill='%237b5ff0'/%3E%3Cpolygon points='1,5.5 9,10 9,19 1,14.5' fill='%235b3ce0'/%3E%3Cpolygon points='17,5.5 9,10 9,19 17,14.5' fill='%234428b8'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;800&family=Space+Mono:wght@400;700&display=swap">
+<style>
+  /* Block world: a white void with a faint isometric grid, solid ink outlines and hard offset shadows. */
+  :root {
+    --ink: #16171a;
+    --ink-2: #3a3c42;
+    --muted: #5c5e66;
+    --line: #e4e4e8;
+    --grid: #f0f0f3;
+    --paper: #ffffff;
+    --violet: #5b3ce0;
+    --red: #ef3b36;
+    --lime: #9de02c;
+    --amber: #f2a531;
+    --display: 'Unbounded', system-ui, sans-serif;
+    --mono: 'Space Mono', ui-monospace, monospace;
+    --gutter: 32px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background-color: var(--paper);
+    background-image: linear-gradient(30deg, var(--grid) 1px, transparent 1px), linear-gradient(150deg, var(--grid) 1px, transparent 1px);
+    background-size: 56px 32px;
+    color: var(--ink);
+    font: 15px/1.6 var(--mono);
+    -webkit-text-size-adjust: 100%;
+  }
+  a { color: inherit; }
+  a:hover { color: var(--violet); }
+  :focus-visible { outline: 3px solid var(--violet); outline-offset: 3px; }
+  img { display: block; max-width: 100%; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: var(--gutter); padding-right: var(--gutter); }
+  h1, h2, h3 { font-family: var(--display); margin: 0; }
+  h2 { font-weight: 700; font-size: clamp(32px, 4vw, 44px); letter-spacing: -0.02em; line-height: 1.1; }
+  .sub { margin: 8px 0 28px; color: var(--muted); }
+
+  /* Header: the counters read like a game's resource bar. */
+  header { border-bottom: 1px solid var(--line); background: var(--paper); }
+  header .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px 24px; padding-top: 16px; padding-bottom: 16px; }
+  .counters { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; padding: 0; list-style: none; }
+  .counter { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; white-space: nowrap; }
+  .counter span + span { font-weight: 400; color: var(--muted); }
+  header nav { display: flex; gap: 22px; font-size: 14px; }
+  header nav a { text-decoration: none; }
+
+  .cube { flex: none; }
+
+  /* Hero */
+  .hero { display: flex; flex-wrap: wrap; align-items: center; gap: 48px; padding-top: 80px; padding-bottom: 40px; }
+  .hero > div { flex: 6 1 480px; min-width: 0; }
+  .hero > figure { flex: 5 1 420px; min-width: 0; }
+  .chip { display: inline-block; padding: 6px 10px; background: var(--ink); color: var(--paper); font-size: 12px; letter-spacing: 0.08em; margin-bottom: 22px; }
+  h1 { font-weight: 800; font-size: clamp(40px, 5vw, 72px); line-height: 1; letter-spacing: -0.03em; }
+  h1 .m { color: var(--red); }
+  h1 .b { color: var(--violet); }
+  .lede { margin: 24px 0 0; max-width: 520px; font-size: 16px; color: var(--ink-2); }
+  .actions { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 28px; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 22px; font: 700 15px var(--mono); text-decoration: none; cursor: pointer; border: 2px solid var(--ink); transition: transform 0.12s, box-shadow 0.12s; }
+  .btn-primary { background: var(--violet); border-color: var(--violet); color: var(--paper); box-shadow: 6px 6px 0 var(--ink); }
+  .btn-primary:hover { color: var(--paper); transform: translate(-2px, -2px); box-shadow: 8px 8px 0 var(--ink); }
+  .btn-ghost { background: var(--paper); color: var(--ink); }
+  .btn-ghost:hover { color: var(--ink); box-shadow: 4px 4px 0 var(--ink); }
+  .btn-ghost .copied { color: var(--violet); }
+  .hero-media { position: relative; }
+  .hero-media img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border: 2px solid var(--ink); box-shadow: 12px 12px 0 var(--lime); background: #eceef0; }
+  .hero-media figcaption { margin-top: 18px; font-size: 13px; color: var(--muted); }
+
+  /* Worlds: cube tiles pick the preview below; the preview opens the page. */
+  section { padding-top: 72px; padding-bottom: 24px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
+  .tile { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; width: 100%; padding: 22px; text-align: left; cursor: pointer; font: inherit; color: inherit; background: var(--paper); border: 2px solid var(--ink); transition: transform 0.12s, box-shadow 0.12s; }
+  .tile:hover { box-shadow: 4px 4px 0 var(--ink); }
+  .tile[aria-selected="true"] { transform: translate(-3px, -3px); box-shadow: 8px 8px 0 var(--accent); }
+  .tile .text { display: flex; flex-direction: column; gap: 4px; }
+  .tile .name { font: 700 20px var(--display); letter-spacing: -0.01em; }
+  .tile .tag { font-size: 13px; color: var(--muted); }
+  .preview { display: flex; flex-wrap: wrap; margin-top: 28px; border: 2px solid var(--ink); background: var(--paper); box-shadow: 10px 10px 0 var(--accent, var(--red)); transition: box-shadow 0.2s; }
+  .preview img { flex: 999 1 620px; min-width: 0; aspect-ratio: 16 / 9; object-fit: cover; background: #eceef0; }
+  .preview .side { flex: 1 1 300px; min-width: 0; padding: 28px; display: flex; flex-direction: column; gap: 14px; border-left: 2px solid var(--ink); }
+  .preview .side h3 { font-weight: 800; font-size: 30px; letter-spacing: -0.02em; line-height: 1.1; }
+  .preview .side p { margin: 0; color: var(--ink-2); }
+  .preview .side ul { margin: 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+  .preview .side li::before { content: '▪ '; color: var(--accent, var(--red)); }
+  .preview .side .grow { flex-grow: 1; }
+  .open { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; background: var(--ink); color: var(--paper); text-decoration: none; font-weight: 700; }
+  .open:hover { color: var(--paper); background: var(--violet); }
+
+  /* Lineup */
+  .lineup img { width: 100%; height: auto; border: 2px solid var(--ink); background: var(--paper); }
+  .lineup p { margin: 12px 0 0; color: var(--muted); }
+
+  /* How: three bricks stacked left to right. */
+  .bricks { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0; border: 2px solid var(--ink); background: var(--paper); }
+  .brick { padding: 26px; border-right: 2px solid var(--ink); }
+  .brick:last-child { border-right: 0; }
+  .brick .n { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; margin-bottom: 16px; color: var(--paper); font: 700 15px var(--display); }
+  .brick h3 { font-weight: 700; font-size: 20px; letter-spacing: -0.01em; margin-bottom: 8px; }
+  .brick p { margin: 0; color: var(--ink-2); font-size: 14px; }
+  .plate { margin-top: 28px; }
+  .plate img { width: 100%; border: 2px solid var(--ink); }
+  .plate figcaption { margin-top: 12px; font-size: 13px; color: var(--muted); }
+
+  /* Build */
+  .build { display: flex; flex-wrap: wrap; gap: 32px; padding-bottom: 96px; }
+  .build > div { flex: 1 1 300px; min-width: 0; }
+  .build p { color: var(--ink-2); }
+  pre { flex: 2 1 620px; min-width: 0; margin: 0; padding: 24px; background: var(--ink); color: #f1f1f3; font: 14px/1.7 var(--mono); overflow-x: auto; box-shadow: 10px 10px 0 var(--red); }
+  pre .c { color: #8d909a; }
+  pre .k { color: #b8a6ff; }
+  pre .s { color: #b8ef5a; }
+
+  footer { border-top: 1px solid var(--line); background: var(--paper); font-size: 13px; color: var(--muted); }
+  footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; padding-top: 22px; padding-bottom: 22px; }
+
+  @media (max-width: 760px) {
+    .preview .side { border-left: 0; border-top: 2px solid var(--ink); }
+    .brick { border-right: 0; border-bottom: 2px solid var(--ink); }
+    .brick:last-child { border-bottom: 0; }
+  }
+  @media (max-width: 560px) {
+    :root { --gutter: 16px; }
+    .hero { padding-top: 44px; gap: 36px; }
+    .counters .opt { display: none; }
+    header nav { gap: 16px; }
+    .tiles { grid-template-columns: 1fr; gap: 12px; }
+    .tile { flex-direction: row; align-items: center; gap: 14px; padding: 12px 14px; }
+    .tile svg { width: 40px; height: 44px; }
+    .preview .side { padding: 20px; }
+    .preview .side h3 { font-size: 24px; }
+    pre { font-size: 12.5px; padding: 18px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .btn, .tile, .preview { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <ul class="counters" aria-label="The model in numbers">
+      <li class="counter"><svg class="cube" width="18" height="20" viewBox="0 0 18 20" aria-hidden="true"><polygon points="9,1 17,5.5 9,10 1,5.5" fill="#7b5ff0"/><polygon points="1,5.5 9,10 9,19 1,14.5" fill="#5b3ce0"/><polygon points="17,5.5 9,10 9,19 17,14.5" fill="#4428b8"/></svg><span>195M</span><span>params</span></li>
+      <li class="counter"><svg class="cube" width="18" height="20" viewBox="0 0 18 20" aria-hidden="true"><polygon points="9,1 17,5.5 9,10 1,5.5" fill="#ff6a64"/><polygon points="1,5.5 9,10 9,19 1,14.5" fill="#ef3b36"/><polygon points="17,5.5 9,10 9,19 17,14.5" fill="#c4221e"/></svg><span>30</span><span>Hz</span></li>
+      <li class="counter opt"><svg class="cube" width="18" height="20" viewBox="0 0 18 20" aria-hidden="true"><polygon points="9,1 17,5.5 9,10 1,5.5" fill="#b8ef5a"/><polygon points="1,5.5 9,10 9,19 1,14.5" fill="#9de02c"/><polygon points="17,5.5 9,10 9,19 17,14.5" fill="#7db81a"/></svg><span>29</span><span>joints</span></li>
+      <li class="counter opt"><svg class="cube" width="18" height="20" viewBox="0 0 18 20" aria-hidden="true"><polygon points="9,1 17,5.5 9,10 1,5.5" fill="#ffc062"/><polygon points="1,5.5 9,10 9,19 1,14.5" fill="#f2a531"/><polygon points="17,5.5 9,10 9,19 17,14.5" fill="#c98518"/></svg><span>7</span><span>bodies</span></li>
+      <li class="counter"><svg class="cube" width="18" height="20" viewBox="0 0 18 20" aria-hidden="true"><polygon points="9,1 17,5.5 9,10 1,5.5" fill="#4a4c52"/><polygon points="1,5.5 9,10 9,19 1,14.5" fill="#26272b"/><polygon points="17,5.5 9,10 9,19 17,14.5" fill="#111214"/></svg><span>190</span><span>MB</span></li>
+    </ul>
+    <nav aria-label="Site">
+      <a href="#worlds">worlds</a>
+      <a href="#build">build</a>
+      <a href="https://github.com/repalash/three-motionbricks">github</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap hero" id="top">
+    <div>
+      <div class="chip">THREE-MOTIONBRICKS</div>
+      <h1>A robot built<br>out of <span class="m">motion</span><br><span class="b">bricks</span>.</h1>
+      <p class="lede">NVIDIA MotionBricks in three.js. Give it four recent poses and a target; a 195M-parameter model fills in the steps between them, right in your browser.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="#worlds">enter a world</a>
+        <button class="btn btn-ghost" type="button" id="copy" aria-label="Copy the install command"><span>npm i three-motionbricks</span><span class="copied" aria-live="polite"></span></button>
+      </div>
+    </div>
+    <figure class="hero-media" style="margin: 0">
+      <img src="img/run.webp" width="640" height="360" alt="The G1 robot running down a red lane through a white block city">
+      <figcaption>Recorded in the White city world. No animation clips: every frame is the model's.</figcaption>
+    </figure>
+  </div>
+
+  <section class="wrap" id="worlds" aria-labelledby="worlds-h">
+    <h2 id="worlds-h">Worlds</h2>
+    <p class="sub">Pick a block. Each one is a page you can open full screen and share.</p>
+    <div class="tiles" role="tablist" aria-label="Worlds" id="tiles"></div>
+    <div class="preview" id="preview" role="tabpanel">
+      <img id="pv-img" alt="">
+      <div class="side">
+        <h3 id="pv-title"></h3>
+        <p id="pv-body"></p>
+        <ul id="pv-list"></ul>
+        <div class="grow"></div>
+        <a class="open" id="pv-open" href="#">open full screen <span aria-hidden="true">→</span></a>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap lineup" aria-label="Seven bodies">
+    <img src="img/lineup.jpg" width="1000" height="280" alt="Seven robots and characters running with the same motion">
+    <p>same model, seven bodies: G1 · H1 · T1 · OP3 · RobotExpressive · Astronaut · Polybot</p>
+  </section>
+
+  <section class="wrap" id="how" aria-labelledby="how-h">
+    <h2 id="how-h">How it moves</h2>
+    <p class="sub">No clips, no state machine of animations. Three bricks, over and over.</p>
+    <div class="bricks">
+      <div class="brick"><span class="n" style="background: var(--violet)">1</span><h3>Context</h3><p>The last four poses the robot played: root, rotation and 29 joint angles each.</p></div>
+      <div class="brick"><span class="n" style="background: var(--red)">2</span><h3>Target</h3><p>Where it should end up, and how: a standing, walking or running pose placed on the way to your click.</p></div>
+      <div class="brick"><span class="n" style="background: #7db81a">3</span><h3>Motion</h3><p>0.6&ndash;1.9 s of 30 Hz motion between them, asked for while the last one plays, so the stride never waits.</p></div>
+    </div>
+    <figure class="plate" style="margin-left: 0; margin-right: 0">
+      <img src="img/stride-plate.jpg" alt="A stride, one frame per column, with joint angles plotted below" loading="lazy">
+      <figcaption>One stride, frame by frame. The model runs in a Web Worker with ONNX Runtime Web; your frames never wait for it.</figcaption>
+    </figure>
+  </section>
+
+  <section class="wrap build" id="build" aria-labelledby="build-h">
+    <div>
+      <h2 id="build-h">Build</h2>
+      <p>Only needs three. Bring the G1, a Unitree H1, a Booster T1, or any Mixamo character.</p>
+      <p><a href="https://github.com/repalash/three-motionbricks#readme">read the docs</a></p>
+    </div>
+<pre><code><span class="k">import</span> {MotionBricksCharacter, MOTIONBRICKS_DEFAULTS} <span class="k">from</span> <span class="s">'three-motionbricks'</span>
+
+<span class="k">const</span> g1 = <span class="k">new</span> MotionBricksCharacter()
+g1.setRobot((<span class="k">await</span> <span class="k">new</span> GLTFLoader().loadAsync(MOTIONBRICKS_DEFAULTS.robot)).scene)
+scene.add(g1.object)
+<span class="k">await</span> g1.load()
+
+g1.moveTo(<span class="k">new</span> THREE.Vector3(3, 0, -2), <span class="s">'run'</span>)
+<span class="c">// every frame</span>
+g1.update(clock.getDelta())</code></pre>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>code apache-2.0 · model nvidia open model agreement · robots bsd-3 / apache-2.0 · characters cc0</span>
+    <span>three.js · <a href="https://threepipe.org">threepipe</a></span>
+  </div>
+</footer>
+
+<script>
+  const cube = (top, left, right, size = 72) => `<svg width="${size}" height="${size * 80 / 72}" viewBox="0 0 72 80" aria-hidden="true"><polygon points="36,4 68,22 36,40 4,22" fill="${top}"/><polygon points="4,22 36,40 36,76 4,58" fill="${left}"/><polygon points="68,22 36,40 36,76 68,58" fill="${right}"/></svg>`
+  const worlds = [
+    {
+      id: 'city', title: 'White city', tag: 'click · WASD · run', href: 'city/', img: 'img/run.webp', colors: ['#ff6a64', '#ef3b36', '#c4221e'],
+      body: 'The full demo, built on threepipe: click the floor or drive with WASD through a white block city.',
+      list: ['six scene styles, screen-space GI', 'seven bodies to switch between', 'a lighter model on phones'],
+    },
+    {
+      id: 'bodies', title: 'Seven bodies', tag: 'one model, any rig', href: 'bodies/', img: 'img/bodies.jpg', colors: ['#7b5ff0', '#5b3ce0', '#4428b8'],
+      body: 'One generator, seven skeletons. The G1\'s motion is retargeted live to three robots and three CC0 characters.',
+      list: ['Unitree G1 and H1, Booster T1, Robotis OP3', 'RobotExpressive, Astronaut, Polybot', 'stand, walk, run in step'],
+    },
+    {
+      id: 'plain', title: 'Plain three.js', tag: 'one file, no build', href: 'plain/', img: 'img/plain.jpg', colors: ['#b8ef5a', '#9de02c', '#7db81a'],
+      body: 'An import map, a GLTFLoader and a hundred lines. View the source and copy it.',
+      list: ['no bundler, no framework', 'click to walk, WASD to drive', 'about 120 lines of HTML'],
+    },
+  ]
+  const tiles = document.getElementById('tiles')
+  const preview = document.getElementById('preview')
+  const pick = (i, focus) => {
+    const w = worlds[i]
+    tiles.querySelectorAll('.tile').forEach((t, j) => {
+      t.setAttribute('aria-selected', String(i === j))
+      t.tabIndex = i === j ? 0 : -1
+    })
+    if (focus) tiles.children[i].focus()
+    preview.style.setProperty('--accent', w.colors[1])
+    preview.setAttribute('aria-labelledby', 'tile-' + w.id)
+    const img = document.getElementById('pv-img')
+    img.src = w.img
+    img.alt = w.title
+    document.getElementById('pv-title').textContent = w.title
+    document.getElementById('pv-body').textContent = w.body
+    document.getElementById('pv-list').innerHTML = w.list.map(l => `<li>${l}</li>`).join('')
+    document.getElementById('pv-open').href = w.href
+  }
+  worlds.forEach((w, i) => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'tile'
+    b.id = 'tile-' + w.id
+    b.setAttribute('role', 'tab')
+    b.style.setProperty('--accent', w.colors[1])
+    b.innerHTML = cube(...w.colors) + `<span class="text"><span class="name">${w.title}</span><span class="tag">${w.tag}</span></span>`
+    b.addEventListener('click', () => pick(i))
+    b.addEventListener('dblclick', () => location.href = w.href)
+    b.addEventListener('keydown', e => {
+      const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+      if (d) { e.preventDefault(); pick((i + d + worlds.length) % worlds.length, true) }
+      if (e.key === 'Enter' && b.getAttribute('aria-selected') === 'true') location.href = w.href
+    })
+    tiles.appendChild(b)
+  })
+  pick(Math.max(0, worlds.findIndex(w => '#' + w.id === location.hash)))
+  document.getElementById('copy').addEventListener('click', async e => {
+    const note = e.currentTarget.querySelector('.copied')
+    try {
+      await navigator.clipboard.writeText('npm i three-motionbricks')
+      note.textContent = '✓ copied'
+    } catch {
+      note.textContent = ''
+    }
+    setTimeout(() => note.textContent = '', 1800)
+  })
+</script>
+</body>
+</html>

@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Seven bodies · three-motionbricks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&family=Space+Mono:wght@400;700&display=swap">
+<!-- One MotionBricks G1 generates; six more models take its pose through RetargetedCharacter. Plain three.js. -->
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/",
+      "three-motionbricks": "../dist/index.mjs"
+    }
+  }
+</script>
+<style>
+  :root { --ink: #16171a; --muted: #5c5e66; --violet: #5b3ce0; --paper: #ffffff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #f6f6f8; color: var(--ink); font: 13px/1.5 'Space Mono', ui-monospace, monospace; }
+  canvas { display: block; touch-action: none; }
+  #card { position: fixed; top: calc(16px + env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); width: 300px; padding: 18px; background: var(--paper); border: 2px solid var(--ink); box-shadow: 6px 6px 0 var(--violet); }
+  h1 { margin: 0 0 6px; font: 800 24px/1.1 'Unbounded', sans-serif; letter-spacing: -0.02em; }
+  #status { margin: 0 0 14px; color: var(--muted); min-height: 1.5em; }
+  .gaits { display: flex; gap: 8px; }
+  .gaits button { flex: 1; min-height: 40px; font: 700 13px 'Space Mono', monospace; color: var(--ink); background: var(--paper); border: 2px solid var(--ink); cursor: pointer; }
+  .gaits button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+  .gaits button:disabled { opacity: 0.4; cursor: default; }
+  .gaits button:focus-visible { outline: 3px solid var(--violet); outline-offset: 2px; }
+  .note { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
+  .label { position: fixed; left: 0; top: 0; padding: 3px 7px; background: var(--paper); border: 1.5px solid var(--ink); font-size: 11px; font-weight: 700; white-space: nowrap; pointer-events: none; transform: translate(-50%, 0); will-change: transform; }
+  @media (max-width: 560px) {
+    #card { top: auto; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); left: 12px; right: 12px; width: auto; padding: 14px; box-shadow: 4px 4px 0 var(--violet); }
+    h1 { font-size: 18px; }
+    .note { display: none; }
+    .label { font-size: 10px; padding: 2px 5px; }
+  }
+</style>
+</head>
+<body>
+<section id="card" aria-label="Seven bodies">
+  <h1>Seven bodies</h1>
+  <p id="status" aria-live="polite">Loading the bodies…</p>
+  <div class="gaits" role="group" aria-label="Gait">
+    <button type="button" data-gait="stand" aria-pressed="true" disabled>Stand</button>
+    <button type="button" data-gait="walk" aria-pressed="false" disabled>Walk</button>
+    <button type="button" data-gait="run" aria-pressed="false" disabled>Run</button>
+  </div>
+  <p class="note">One model generates the G1's motion; the other six take the same pose every frame, retargeted to their own skeletons. The floor moves, the bodies stay.</p>
+</section>
+<script src="../switcher.js" data-current="bodies"></script>
+<script type="module">
+  import * as THREE from 'three'
+  import {OrbitControls} from 'three/addons/controls/OrbitControls.js'
+  import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js'
+  import {MotionBricksCharacter, MOTIONBRICKS_CHARACTERS, CHARACTER_RIGS, RetargetedCharacter} from 'three-motionbricks'
+
+  const params = new URLSearchParams(location.search)
+  const status = document.getElementById('status')
+  const assets = params.get('assets') ?? '../assets/'
+
+  const renderer = new THREE.WebGLRenderer({antialias: true})
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+  renderer.setSize(innerWidth, innerHeight)
+  renderer.shadowMap.enabled = true
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  document.body.prepend(renderer.domElement)
+
+  const scene = new THREE.Scene()
+  scene.background = new THREE.Color('#f6f6f8')
+  scene.fog = new THREE.Fog('#f6f6f8', 16, 34)
+  const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 0.1, 100)
+  const controls = new OrbitControls(camera, renderer.domElement)
+  controls.enableDamping = true
+  controls.maxPolarAngle = Math.PI * 0.49
+  controls.minDistance = 4
+  controls.maxDistance = 30
+
+  scene.add(new THREE.HemisphereLight('#ffffff', '#d4d2de', 1.9))
+  const sun = new THREE.DirectionalLight('#fff6ec', 2.4)
+  sun.position.set(4, 9, 5)
+  sun.castShadow = true
+  sun.shadow.mapSize.setScalar(2048)
+  Object.assign(sun.shadow.camera, {left: -7, right: 7, top: 7, bottom: -7, near: 1, far: 30})
+  sun.shadow.bias = -0.0004
+  scene.add(sun)
+
+  // The floor: white, with a grid that slides under the bodies as the G1 moves forward.
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 80).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({color: '#ffffff', roughness: 1}))
+  floor.receiveShadow = true
+  const grid = new THREE.GridHelper(60, 60, '#d5d5dc', '#e3e3e8')
+  grid.position.y = 0.002
+  const lane = new THREE.Group()
+  for (let i = -30; i < 30; i += 2) {
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.035).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({color: '#5b3ce0', transparent: true, opacity: 0.45}))
+    dash.position.set(i, 0.004, 0)
+    lane.add(dash)
+  }
+  scene.add(floor, grid)
+
+  // The line-up runs along Z; each body faces +X, the way the G1 runs.
+  const SPACING = 1.25
+  const bodies = MOTIONBRICKS_CHARACTERS.map(c => ({c, holder: new THREE.Group()}))
+  const half = (bodies.length - 1) / 2
+  const lanes = []
+  bodies.forEach((b, i) => {
+    b.holder.position.z = (i - half) * SPACING
+    scene.add(b.holder)
+    // A dashed line between neighbours.
+    if (i === bodies.length - 1) return
+    const marks = lane.clone()
+    marks.position.z = b.holder.position.z + SPACING / 2
+    scene.add(marks)
+    lanes.push(marks)
+  })
+
+  const frame = () => {
+    // Wide screens see the line-up from the front; tall ones look along it, so it recedes instead of shrinking.
+    const tall = camera.aspect < 1
+    const d = tall ? 15 : 12.5 / Math.min(1, camera.aspect / 1.2)
+    camera.fov = tall ? 38 : 30
+    camera.updateProjectionMatrix()
+    const target = tall ? new THREE.Vector3(0, 0.3, 1) : new THREE.Vector3(0, 0.7, 0)
+    camera.position.copy(target).add(tall ? new THREE.Vector3(d * 0.5, d * 0.36, d * 0.79) : new THREE.Vector3(d * 0.9, d * 0.26, d * 0.34))
+    scene.fog.near = d * 1.1
+    scene.fog.far = d * 2.6
+    controls.target.copy(target)
+    controls.update()
+  }
+
+  const g1 = new MotionBricksCharacter({
+    model: params.get('model') ?? '../model/',
+    liteModel: params.get('liteModel') ?? '../model-lite/',
+  })
+  bodies[0].holder.add(g1.object)
+  const others = []
+  const labels = bodies.map(b => {
+    const el = document.createElement('div')
+    el.className = 'label'
+    el.textContent = b.c.label
+    document.body.appendChild(el)
+    return el
+  })
+
+  const loader = new GLTFLoader()
+  const loadBody = async b => {
+    const gltf = await loader.loadAsync(assets + b.c.file)
+    if (b.c.id === 'g1') g1.setRobot(gltf.scene)
+    else {
+      const r = new RetargetedCharacter(gltf.scene, CHARACTER_RIGS[b.c.rig])
+      b.holder.add(r.object)
+      others.push(r)
+    }
+  }
+
+  let gait = 'stand'
+  const buttons = [...document.querySelectorAll('.gaits button')]
+  const setGait = g => {
+    gait = g
+    buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.gait === g)))
+    if (g === 'stand') g1.stop()
+  }
+  buttons.forEach(b => b.addEventListener('click', () => setGait(b.dataset.gait)))
+
+  Promise.all(bodies.map(loadBody)).then(() => {
+    status.textContent = 'Loading the model…'
+    return g1.load((stage, loaded, total) => {
+      status.textContent = stage === 'model' ? `Downloading the model… ${Math.round(loaded / 1e6)}${total ? ' / ' + Math.round(total / 1e6) : ''} MB` :
+        stage === 'warmup' ? 'Warming up…' : 'Loading ONNX Runtime…'
+    })
+  }).then(() => {
+    buttons.forEach(b => b.disabled = false)
+    status.textContent = 'Walking. Drag to orbit.'
+    setGait(params.get('gait') === 'run' ? 'run' : 'walk')
+  }).catch(e => {
+    status.textContent = 'Could not start: ' + e.message
+    console.error(e)
+  })
+
+  // The G1 runs forward for real; every body shows that pose with the forward travel taken out (a treadmill).
+  const forward = new THREE.Vector3(1, 0, 0)
+  const pose = new Float32Array(36)
+  let travelled = 0, lastX = null
+  const clock = new THREE.Clock()
+  const tmp = new THREE.Vector3()
+  renderer.setAnimationLoop(() => {
+    const dt = Math.min(clock.getDelta(), 0.1)
+    if (g1.ready && gait !== 'stand') g1.drive(forward, gait)
+    g1.update(dt)
+    const p = g1.controller?.pose
+    if (p) {
+      if (lastX !== null) travelled += p[0] - lastX
+      lastX = p[0]
+      pose.set(p)
+      pose[0] = 0
+      pose[1] = 0
+      g1.robot?.setPose(pose)
+      for (const r of others) r.setPose(pose)
+      const slide = -(travelled % 2)
+      grid.position.x = -(travelled % 1)
+      for (const l of lanes) l.position.x = slide
+    }
+    controls.update()
+    renderer.render(scene, camera)
+    // Name tags under the feet.
+    bodies.forEach((b, i) => {
+      tmp.set(0, 0, 0).applyMatrix4(b.holder.matrixWorld).add({x: 0.55, y: 0, z: 0}).project(camera)
+      const w = labels[i].offsetWidth / 2 + 6
+      const x = Math.min(Math.max((tmp.x + 1) / 2 * innerWidth, w), innerWidth - w)
+      labels[i].style.transform = `translate(${x}px, ${(1 - tmp.y) / 2 * innerHeight}px) translate(-50%, 0)`
+      labels[i].style.visibility = tmp.z < 1 ? 'visible' : 'hidden'
+    })
+  })
+
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight
+    camera.updateProjectionMatrix()
+    renderer.setSize(innerWidth, innerHeight)
+    frame()
+  })
+  frame()
+  window.g1 = g1
+</script>
+</body>
+</html>
