@@ -46,7 +46,7 @@ jobs:
       - name: Pack the model
         if: steps.packs.outputs.cache-hit != 'true'
         run: |
-          pip install onnx==1.23.2 onnxruntime==1.31.1 numpy==2.5.4
+          pip install onnx==1.23.2 onnx-ir==1.1.0 onnxruntime==1.31.1 numpy==2.5.4
           curl -fL --retry 3 -o mmm_v6_g1_fp32.onnx \
             https://media.githubusercontent.com/media/NVlabs/motionbricks/main/motionbricks/assets/onnx/unitree_g1/mmm_v6_g1_fp32.onnx
           python tools/pack_model.py mmm_v6_g1_fp32.onnx packs/model

@@ -6,7 +6,7 @@ convolution weights as int8 behind DequantizeLinear, with every weight in ONNX e
 the session settles near 0.5 GB, and the motion matches pack_model.py's (about 2 degrees from fp32 on average).
 Generation is slower on one thread (about 0.8 s against 0.5 s), so use it where memory is short.
 
-  pip install onnx onnxruntime numpy
+  pip install onnx onnx-ir onnxruntime numpy
   python pack_lite.py mmm_v6_g1_fp32.onnx lite/
 
 Writes lite/graph.onnx, lite/weights.NNN (parts of at most --shard-mb), and lite/pack.json for
