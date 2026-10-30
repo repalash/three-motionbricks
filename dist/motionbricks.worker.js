@@ -157,6 +157,7 @@ class MotionBricksG1 {
    */
   static async LoadPacked(ort, baseUrl, sessionOptions = {}, onProgress) {
     const manifest = await (await fetch(baseUrl + "pack.json")).json();
+    if (manifest.format === "motionbricks-external") return MotionBricksG1._loadLite(ort, baseUrl, manifest, sessionOptions, onProgress);
     if (manifest.format !== "motionbricks-q8") throw new Error("Unknown model pack format");
     let loaded = 0;
     const total = manifest.q8Length;
@@ -175,7 +176,23 @@ class MotionBricksG1 {
       externalData: [{ path: manifest.weights, data: new Uint8Array(weights.buffer) }]
     });
   }
-  /** Load a pack folder from tools/pack_model.py (a URL ending in /) or an original .onnx file. */
+  /** A pack from tools/pack_lite.py: the weights go to the session as they are, with no fp32 copy. */
+  static async _loadLite(ort, baseUrl, manifest, sessionOptions, onProgress) {
+    let loaded = 0;
+    const count = (n) => onProgress?.(loaded += n, manifest.bytes);
+    const data = new Uint8Array(manifest.bytes);
+    const [graph] = await Promise.all([
+      fetchBytes(baseUrl + manifest.graph),
+      ...manifest.shards.map(async (s, i) => fetchBytes(baseUrl + s, count, data, i * manifest.shardBytes))
+    ]);
+    return MotionBricksG1._create(ort, graph, {
+      enableCpuMemArena: false,
+      enableMemPattern: false,
+      ...sessionOptions,
+      externalData: [{ path: manifest.weights, data }]
+    });
+  }
+  /** Load a pack folder from tools/pack_model.py or tools/pack_lite.py (a URL ending in /), or an original .onnx file. */
   static async Load(ort, model, sessionOptions = {}, onProgress) {
     return model.endsWith("/") ? MotionBricksG1.LoadPacked(ort, model, sessionOptions, onProgress) : MotionBricksG1.LoadOnnx(ort, model, sessionOptions, onProgress);
   }

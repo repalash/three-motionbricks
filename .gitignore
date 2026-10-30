@@ -3,3 +3,4 @@ docs
 *.log
 .DS_Store
 example/_pack
+__pycache__/

@@ -44,6 +44,19 @@ export interface MotionGenerator {
     readonly backend: string;
     generate(context: ArrayLike<number>[], target: ArrayLike<number>[], options?: GenerateOptions): Promise<GeneratedMotion>;
 }
+/**
+ * Manifest written by tools/pack_lite.py: a graph whose weights stay 8-bit in memory (MatMulNBits and int8
+ * convolutions), with its ONNX external data in shards.
+ */
+export interface LitePackManifest {
+    format: 'motionbricks-external';
+    graph: string;
+    /** The external data file name the graph refers to. */
+    weights: string;
+    bytes: number;
+    shardBytes: number;
+    shards: string[];
+}
 /** Manifest written by tools/pack_model.py. */
 export interface PackManifest {
     format: 'motionbricks-q8';
@@ -85,7 +98,9 @@ export declare class MotionBricksG1 implements MotionGenerator {
      * @param baseUrl folder that holds pack.json, ending with a slash
      */
     static LoadPacked(ort: OrtApi, baseUrl: string, sessionOptions?: any, onProgress?: ProgressCallback): Promise<MotionBricksG1>;
-    /** Load a pack folder from tools/pack_model.py (a URL ending in /) or an original .onnx file. */
+    /** A pack from tools/pack_lite.py: the weights go to the session as they are, with no fp32 copy. */
+    private static _loadLite;
+    /** Load a pack folder from tools/pack_model.py or tools/pack_lite.py (a URL ending in /), or an original .onnx file. */
     static Load(ort: OrtApi, model: string, sessionOptions?: any, onProgress?: ProgressCallback): Promise<MotionBricksG1>;
     /** Load an original MotionBricks G1 .onnx file, such as mmm_v6_g1_fp32.onnx. */
     static LoadOnnx(ort: OrtApi, url: string, sessionOptions?: any, onProgress?: ProgressCallback): Promise<MotionBricksG1>;

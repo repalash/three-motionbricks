@@ -55,6 +55,13 @@ export declare const MOTIONBRICKS_CHARACTERS: readonly [{
 export interface MotionBricksCharacterOptions {
     /** A folder with pack.json from tools/pack_model.py (ending in /), or an original MotionBricks G1 .onnx file. */
     model?: string;
+    /**
+     * A pack from tools/pack_lite.py, whose weights stay 8-bit in memory: about 0.5 GB in the browser against
+     * 1.5 GB or more, with slower generation. Used instead of `model` where `lite` says.
+     */
+    liteModel?: string;
+    /** Use `liteModel`: always, never, or 'auto' (default) on phones, tablets and devices with 4 GB or less. */
+    lite?: boolean | 'auto';
     /** The onnxruntime-web module to import. */
     ort?: string;
     /** Parts of the ORT .wasm file, joined in order, for hosts that limit file size. */
@@ -162,6 +169,8 @@ export declare class MotionBricksCharacter {
     /** Stop the worker. The robot stays in the scene, and load() starts the model again from where it stands. */
     dispose(): void;
 }
+/** A phone, a tablet, or a device reporting 4 GB of memory or less, where the full model does not fit. */
+export declare function isLowMemoryDevice(): boolean;
 /** Import onnxruntime-web on the page, for when no worker is used. */
 export declare function loadOrt(url: string, wasm?: string[]): Promise<OrtApi & {
     env: any;

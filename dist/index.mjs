@@ -167,6 +167,7 @@ class MotionBricksG1 {
    */
   static async LoadPacked(ort, baseUrl, sessionOptions = {}, onProgress) {
     const manifest = await (await fetch(baseUrl + "pack.json")).json();
+    if (manifest.format === "motionbricks-external") return MotionBricksG1._loadLite(ort, baseUrl, manifest, sessionOptions, onProgress);
     if (manifest.format !== "motionbricks-q8") throw new Error("Unknown model pack format");
     let loaded = 0;
     const total = manifest.q8Length;
@@ -185,7 +186,23 @@ class MotionBricksG1 {
       externalData: [{ path: manifest.weights, data: new Uint8Array(weights.buffer) }]
     });
   }
-  /** Load a pack folder from tools/pack_model.py (a URL ending in /) or an original .onnx file. */
+  /** A pack from tools/pack_lite.py: the weights go to the session as they are, with no fp32 copy. */
+  static async _loadLite(ort, baseUrl, manifest, sessionOptions, onProgress) {
+    let loaded = 0;
+    const count = (n) => onProgress?.(loaded += n, manifest.bytes);
+    const data = new Uint8Array(manifest.bytes);
+    const [graph] = await Promise.all([
+      fetchBytes(baseUrl + manifest.graph),
+      ...manifest.shards.map(async (s, i) => fetchBytes(baseUrl + s, count, data, i * manifest.shardBytes))
+    ]);
+    return MotionBricksG1._create(ort, graph, {
+      enableCpuMemArena: false,
+      enableMemPattern: false,
+      ...sessionOptions,
+      externalData: [{ path: manifest.weights, data }]
+    });
+  }
+  /** Load a pack folder from tools/pack_model.py or tools/pack_lite.py (a URL ending in /), or an original .onnx file. */
   static async Load(ort, model, sessionOptions = {}, onProgress) {
     return model.endsWith("/") ? MotionBricksG1.LoadPacked(ort, model, sessionOptions, onProgress) : MotionBricksG1.LoadOnnx(ort, model, sessionOptions, onProgress);
   }
@@ -533,6 +550,7 @@ const CHARACTER_RIGS = {
     root: "Body",
     forward: "+z",
     // Its feet are IK targets under the root: they follow the shins' ends, which also mark the ankles.
+    // eslint-disable-next-line @typescript-eslint/naming-convention
     attach: { "Foot.L": "LowerLeg.L_end", "Foot.R": "LowerLeg.R_end" },
     ends: { leftShin: "LowerLeg.L_end", rightShin: "LowerLeg.R_end", leftForearm: "Palm2.L", rightForearm: "Palm2.R" }
   },
@@ -618,7 +636,7 @@ function g1Skeleton() {
   return { root, robot: G1Robot.FromObject(root, { shadows: false }) };
 }
 function sanitize(name) {
-  return name.replace(/\s/g, "_").replace(/[\[\].:/]/g, "");
+  return name.replace(/\s/g, "_").replace(/[[\].:/]/g, "");
 }
 const tq = new Quaternion(), tq2 = new Quaternion(), tv = new Vector3(), tv2 = new Vector3();
 function depth(o) {
@@ -1154,7 +1172,8 @@ class MotionBricksCharacter {
   async _load(onProgress) {
     const o = this.options;
     const ortUrl = o.ort ?? MOTIONBRICKS_DEFAULTS.ort;
-    const model = o.model ?? MOTIONBRICKS_DEFAULTS.model;
+    const useLite = !!o.liteModel && (o.lite === true || (o.lite ?? "auto") === "auto" && isLowMemoryDevice());
+    const model = useLite ? o.liteModel : o.model ?? MOTIONBRICKS_DEFAULTS.model;
     const useGpu = o.backend === "webgpu" && typeof navigator !== "undefined" && "gpu" in navigator;
     const sessionOptions = { executionProviders: useGpu ? ["webgpu", "wasm"] : ["wasm"], graphOptimizationLevel: "all" };
     const progress = (l, t) => onProgress?.("model", l, t);
@@ -1267,6 +1286,12 @@ class MotionBricksCharacter {
     this.controller = void 0;
   }
 }
+function isLowMemoryDevice() {
+  if (typeof navigator === "undefined") return false;
+  const memory = navigator.deviceMemory;
+  if (memory && memory <= 4) return true;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || navigator.platform.includes("Mac") && navigator.maxTouchPoints > 1;
+}
 async function loadOrt(url, wasm) {
   const ort = await import(
     /* @vite-ignore */
@@ -1299,6 +1324,7 @@ export {
   correctEndpoints,
   dequantizePack,
   heading,
+  isLowMemoryDevice,
   lerpPose,
   loadOrt,
   placePoses,
