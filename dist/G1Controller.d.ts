@@ -1,4 +1,4 @@
-import { G1Obstacle } from './G1Primitives';
+import { G1Obstacle, G1PrimitiveStep } from './G1Primitives';
 import { G1Pose, MotionGenerator } from './MotionBricksG1';
 import { PoseRig } from './PoseRig';
 export interface G1Bricks {
@@ -73,11 +73,28 @@ export declare class G1Controller {
     speedOf(gait: G1Gait): number;
     get moving(): boolean;
     get generating(): boolean;
-    /** The Smart Primitive being played (a jump, a vault, sitting down), or null. */
+    /**
+     * The sequence being played (a jump, a vault, sitting down, or one given to perform), or null: its name, primitive,
+     * the step whose motion is playing, and that step's index.
+     */
     get action(): {
+        name: string;
         primitive: import('./G1Primitives').G1Primitive | null;
         step: string;
+        index: number;
     } | null;
+    /** Whether a sequence is asked for, generating or playing, so that new goals wait for it. */
+    get busy(): boolean;
+    /**
+     * Play target steps in controller space, one generation each: poses authored at the origin facing +X and placed
+     * with rig.place, such as the human's kick or reach (SOMAActions). With `hold`, the motion ends on the last step
+     * and stays there; otherwise the robot goes on to its goal, or stops, after it. The steps start from the next
+     * generation, so the motion already planned plays into them.
+     */
+    perform(steps: G1PrimitiveStep[], { name, hold }?: {
+        name?: string;
+        hold?: boolean;
+    }): void;
     /** The segment being played: its length and transition point in frames, and the playhead. */
     get playback(): {
         frames: number;

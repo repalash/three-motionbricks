@@ -12,7 +12,7 @@ cp -R site/. "$out/"
 cp -R dist assets "$out/"
 # city/app.js bundles the library, which starts its worker from next to itself.
 cp dist/motionbricks.worker.js "$out/city/"
-cp docs/hero.jpg docs/run.webp docs/stride-plate.jpg docs/lineup.jpg docs/bodies.jpg docs/playground.jpg docs/plain.jpg "$out/img/"
+cp docs/hero.jpg docs/run.webp docs/stride-plate.jpg docs/lineup.jpg docs/bodies.jpg docs/playground.jpg docs/park.jpg docs/tag.jpg docs/plain.jpg "$out/img/"
 
 # The plain example, with the model packs next to it and the world switcher.
 src=example/index.html

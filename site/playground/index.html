@@ -51,6 +51,7 @@
     <dt><kbd>Shift</kbd></dt><dd>run while held (<kbd>R</kbd> keeps running)</dd>
     <dt><kbd>E</kbd></dt><dd>sit on a stool nearby, or stand up</dd>
     <dt>click</dt><dd>walk to a spot; drag to orbit</dd>
+    <dt><kbd>P</kbd></dt><dd>pause, and orbit to look at the pose</dd>
   </dl>
   <p class="note">Run at a red box or a black wall to jump it, under a bar to duck. NVIDIA's Smart Primitives place a few target poses around each obstacle; the model generates everything between them.</p>
   <p class="note" id="models">Model: <a href="?">G1 robot</a> · <a href="?model=human">Human</a> · <a href="?model=human&amp;character=astronaut">Astronaut</a></p>
@@ -245,7 +246,9 @@
   }
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.1)
-    if (g1.ready) {
+    // Paused (the switcher's button or P): the robot holds its pose; the camera still orbits.
+    const paused = !!window.motionbricksPaused
+    if (g1.ready && !paused) {
       let ix = 0, iy = 0
       for (const k of keys) if (moveKeys[k]) {
         ix += moveKeys[k][0]
@@ -263,7 +266,7 @@
         keyDriving = false
       }
     }
-    g1.update(dt)
+    if (!paused) g1.update(dt)
 
     // Follow the robot, keeping the orbit the user chose; the sun follows so its shadow stays sharp.
     g1.getPosition(at).setY(0.8)

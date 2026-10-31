@@ -216,7 +216,7 @@
     gait = g
     buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.gait === g)))
     if (g === 'stand') g1.stop()
-    if (g1.ready) status.textContent = {stand: 'Standing', walk: 'Walking', run: 'Running'}[g] + '. Drag to orbit.'
+    if (g1.ready) status.textContent = {stand: 'Standing', walk: 'Walking', run: 'Running'}[g] + '. Drag to orbit; P pauses.'
   }
   buttons.forEach(b => b.addEventListener('click', () => setGait(b.dataset.gait)))
 
@@ -251,8 +251,10 @@
   const tmp = new THREE.Vector3()
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.1)
-    if (g1.ready && gait !== 'stand') g1.drive(forward, gait)
-    g1.update(dt)
+    // Paused (the switcher's button or P): the bodies hold their pose; the camera still orbits.
+    const paused = !!window.motionbricksPaused
+    if (g1.ready && gait !== 'stand' && !paused) g1.drive(forward, gait)
+    if (!paused) g1.update(dt)
     const p = g1.controller?.pose
     if (p) {
       if (lastX !== null) travelled += p[0] - lastX

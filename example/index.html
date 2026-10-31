@@ -97,8 +97,11 @@
         if (keys.has('KeyS')) dir.sub(forward)
         if (keys.has('KeyD')) dir.add(right)
         if (keys.has('KeyA')) dir.sub(right)
-        g1.drive(keys.size ? dir : null, keys.has('ShiftLeft') || keys.has('ShiftRight') ? 'run' : 'walk')
-        g1.update(dt)
+        // window.motionbricksPaused: set by the site's pause button; the robot then holds its pose.
+        if (!window.motionbricksPaused) {
+            g1.drive(keys.size ? dir : null, keys.has('ShiftLeft') || keys.has('ShiftRight') ? 'run' : 'walk')
+            g1.update(dt)
+        }
 
         // Follow the robot, keeping the orbit; the sun follows too, so its shadow stays sharp.
         const delta = g1.getPosition(follow).setY(0.75).sub(controls.target).multiplyScalar(1 - Math.exp(-dt * 2.5))

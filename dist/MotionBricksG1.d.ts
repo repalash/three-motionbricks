@@ -47,6 +47,19 @@ export interface MotionGenerator {
     generate(context: ArrayLike<number>[], target: ArrayLike<number>[], options?: GenerateOptions): Promise<GeneratedMotion>;
 }
 /**
+ * An engine shared by several controllers (several characters on one model): generations run one after another, and
+ * each reports its time from the call, waiting included, so every controller plans for the delay it sees.
+ */
+export declare class SharedEngine implements MotionGenerator {
+    readonly engine: MotionGenerator;
+    private _tail;
+    /** Generations asked for and not yet finished. */
+    waiting: number;
+    constructor(engine: MotionGenerator);
+    get backend(): string;
+    generate(context: ArrayLike<number>[], target: ArrayLike<number>[], options?: GenerateOptions): Promise<GeneratedMotion>;
+}
+/**
  * Manifest written by tools/pack_lite.py: a graph whose weights stay 8-bit in memory (MatMulNBits and int8
  * convolutions), with its ONNX external data in shards.
  */

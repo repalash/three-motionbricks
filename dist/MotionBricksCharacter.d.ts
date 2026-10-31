@@ -5,6 +5,7 @@ import { G1Bricks, G1Controller, G1ControllerStats, G1Gait } from './G1Controlle
 import { SOMAMannequin } from './SOMAMannequin';
 import { MotionGenerator, OrtApi } from './MotionBricksG1';
 import { G1_PRIMITIVE_SOURCES, G1Primitive } from './G1Primitives';
+import { Side } from './SOMAActions';
 /** Where the model and ONNX Runtime load from when the options do not say, and where the robot model is. */
 export declare const MOTIONBRICKS_DEFAULTS: {
     /** NVIDIA's original fp32 model, 730 MB. A pack from tools/pack_model.py is about 190 MB. */
@@ -112,6 +113,28 @@ export interface MotionBricksObstacle {
 }
 export type LoadStage = 'runtime' | 'model' | 'warmup';
 /**
+ * Something the human picks up, carries and throws or puts down. `position` is its centre in world space, kept up to
+ * date by you while it lies about and by the character while it is carried; `object`, when given, is moved with it.
+ */
+export interface MotionBricksItem {
+    position: Vector3;
+    /** Its size across, in metres: up to about 0.2 is held in one hand, more in two. Default 0.12. */
+    size?: number;
+    /** 'one' or 'two' hands; by default from the size. */
+    hands?: 'one' | 'two';
+    object?: Object3D;
+}
+/** What the human is doing: the interaction under way, and its stage. */
+export interface MotionBricksInteraction {
+    kind: 'kick' | 'pick' | 'throw' | 'put';
+    /** 'approach' while walking up to it, then the step playing ('Kick', 'Reach', 'Lift', 'Throw', 'Recover'). */
+    stage: string;
+    /** The item picked up or put down. */
+    item?: MotionBricksItem;
+}
+/** The launch velocity that carries a thrown item from `from` to `to` in a flight time that grows with distance. */
+export declare function ballistic(from: Vector3, to: Vector3, gravity?: number): Vector3;
+/**
  * A Unitree G1 that walks and runs where you send it, with every frame of motion generated in the
  * browser by NVIDIA MotionBricks. Add `object` to a three.js scene and call `update(dt)` every frame.
  *
@@ -143,6 +166,19 @@ export declare class MotionBricksCharacter {
     /** Where the robot stood when the model was disposed, so a new load continues from there. */
     private _lastPose?;
     private _drive;
+    /** The interaction under way (kick, pick up, throw, put down). */
+    private _task;
+    /** What the human holds, and how far the carrying arms are blended in (0 to 1). */
+    private _carry;
+    /** The pose shown: the controller's, with the carrying arms on top. */
+    private _shown?;
+    private _shownWorld;
+    private _lastWorld;
+    private _lastDt;
+    /** Called when the human picks an item up. */
+    onPickUp?: (item: MotionBricksItem) => void;
+    /** Called when the human lets go of an item: thrown (with the velocity to give it, m/s in world space) or put down. */
+    onRelease?: (item: MotionBricksItem, velocity: Vector3) => void;
     constructor(options?: MotionBricksCharacterOptions);
     private get _rig();
     private get _bricks();
@@ -185,8 +221,67 @@ export declare class MotionBricksCharacter {
      */
     load(onProgress?: (stage: LoadStage, loaded: number, total: number) => void): Promise<this>;
     private _load;
+    /**
+     * Share another character's model instead of loading one: several characters, one download and one worker. Their
+     * generations take turns, so each waits a little longer as more share it. Both must use the same rig.
+     */
+    loadFrom(other: MotionBricksCharacter): Promise<this>;
+    private _startController;
     /** Advance the motion by dt seconds and pose the robot. Call it every frame. */
     update(dt: number): void;
+    /** The interaction under way, or null. */
+    get interaction(): MotionBricksInteraction | null;
+    /** The item being carried, or null. */
+    get carrying(): MotionBricksItem | null;
+    /**
+     * While a kick is under way, the way the ball should go (a world direction on the ground) and how hard (1 is a
+     * firm pass): for your ball physics, which detects the foot meeting the ball with jointPosition.
+     */
+    get kicking(): {
+        direction: Vector3;
+        power: number;
+        foot: Side;
+    } | null;
+    /** A SOMA joint's position in world space as shown, such as 'RightToeBase', 'LeftFoot' or 'RightHand'. */
+    jointPosition(name: string, target?: Vector3): Vector3 | null;
+    /** A SOMA joint's velocity in world space, m/s, over the last frame. */
+    jointVelocity(name: string, target?: Vector3): Vector3 | null;
+    /**
+     * Kick a ball at a world point: walk up to it (lining up first when it is to the side) and swing through it.
+     * `direction` is where it should go (by default straight on from the human); `power` 0.5 to 2.
+     */
+    kick(ball: Vector3, { direction, power, foot }?: {
+        direction?: Vector3;
+        power?: number;
+        foot?: Side;
+    }): boolean;
+    /** Walk to an item, crouch and pick it up; it is then carried until thrown or put down. */
+    pickUp(item: MotionBricksItem): boolean;
+    /** Throw the carried item at a world point, turning to face it. onRelease gives the velocity that lands it there. */
+    throwAt(target: Vector3, { power }?: {
+        power?: number;
+    }): boolean;
+    /**
+     * Put the carried item down at a world point (by default on the ground just ahead), crouching to it. A point above
+     * the ground, such as the top of a stack, puts the item's centre there.
+     */
+    putDown(at?: Vector3): boolean;
+    /** Stop the interaction under way, if it has not started its motion. */
+    cancelInteraction(): void;
+    private _canInteract;
+    private _startTask;
+    /** Walk toward the task's spot, aiming a little short of it so that a late generation never steps onto it. */
+    private _approach;
+    private _updateTask;
+    private _act;
+    private _hands;
+    /** Where the hand (or hands) hold an item, in world space. */
+    private _handHold;
+    private _placeCarried;
+    /** The controller's pose with the arms holding the carried item, blended in over a third of a second. */
+    private _carryPose;
+    private _toG1Direction;
+    private _fromG1Direction;
     /**
      * Load one of NVIDIA's Smart Primitives for this model: 'jump_0_5m' (a box), 'jump_0_75m' (a wall), 'avoidance'
      * (a bar to duck under) or 'sit' (a stool); primitive.box.size gives its size. Its clips download from NVIDIA's

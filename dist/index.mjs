@@ -99,6 +99,28 @@ function fadeWeight(v) {
   const r = 1 - t;
   return t < 0.5 ? 1 - 2 * t * t : 2 * r * r;
 }
+class SharedEngine {
+  constructor(engine) {
+    this._tail = Promise.resolve();
+    this.waiting = 0;
+    this.engine = engine;
+  }
+  get backend() {
+    return this.engine.backend;
+  }
+  async generate(context, target, options) {
+    const start = performance.now();
+    this.waiting++;
+    const run = this._tail.then(async () => this.engine.generate(context, target, options));
+    this._tail = run.catch(() => void 0);
+    try {
+      const motion = await run;
+      return { ...motion, inferenceMs: performance.now() - start };
+    } finally {
+      this.waiting--;
+    }
+  }
+}
 async function setupOrtWeb(ort, wasm) {
   ort.env.logLevel = "error";
   ort.env.wasm.numThreads = globalThis.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
@@ -1672,10 +1694,31 @@ class G1Controller {
   get generating() {
     return this._request !== null;
   }
-  /** The Smart Primitive being played (a jump, a vault, sitting down), or null. */
+  /**
+   * The sequence being played (a jump, a vault, sitting down, or one given to perform), or null: its name, primitive,
+   * the step whose motion is playing, and that step's index.
+   */
   get action() {
     const seq = this._segment?.sequence;
-    return seq ? { primitive: seq.obstacle?.primitive ?? null, step: seq.steps[seq.next - 1]?.name ?? "" } : null;
+    return seq ? { name: seq.name ?? "", primitive: seq.obstacle?.primitive ?? null, step: seq.steps[seq.next - 1]?.name ?? "", index: seq.next - 1 } : null;
+  }
+  /** Whether a sequence is asked for, generating or playing, so that new goals wait for it. */
+  get busy() {
+    const seq = this._pending?.request.sequence ?? this._request?.sequence ?? this._segment?.sequence;
+    return !!this._action || !!seq && (seq.next < seq.steps.length || !!seq.hold && this._segment?.sequence === seq && this._frame < this._segment.poses.length - 1);
+  }
+  /**
+   * Play target steps in controller space, one generation each: poses authored at the origin facing +X and placed
+   * with rig.place, such as the human's kick or reach (SOMAActions). With `hold`, the motion ends on the last step
+   * and stays there; otherwise the robot goes on to its goal, or stops, after it. The steps start from the next
+   * generation, so the motion already planned plays into them.
+   */
+  perform(steps, { name = "", hold = true } = {}) {
+    this.goal = null;
+    this._action = { name, steps, next: 0, hold };
+    const playing = this._segment?.sequence;
+    if (this._request || this._pending) this._dirty = true;
+    else if (!playing || playing.next >= playing.steps.length) this._generate(true);
   }
   /** The segment being played: its length and transition point in frames, and the playhead. */
   get playback() {
@@ -1725,7 +1768,7 @@ class G1Controller {
    */
   _regenerate() {
     const seq = this._pending?.request.sequence ?? this._request?.sequence ?? this._segment?.sequence;
-    if (seq && seq.next < seq.steps.length) return;
+    if (seq && seq.next < seq.steps.length || this._action) return;
     if (this._request || this._pending) this._dirty = true;
     else this._generate(true);
   }
@@ -2305,6 +2348,287 @@ class MotionBricksRemote {
     });
   }
 }
+const K = SOMA_SKELETON_INFO;
+const v3 = {
+  sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
+  add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
+  scale: (a, s) => [a[0] * s, a[1] * s, a[2] * s],
+  dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+  cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+  len: (a) => Math.hypot(a[0], a[1], a[2]),
+  norm: (a) => {
+    const l = Math.hypot(a[0], a[1], a[2]) || 1;
+    return [a[0] / l, a[1] / l, a[2] / l];
+  },
+  lerp: (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+};
+const quat = {
+  mul(a, b) {
+    return [
+      a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+      a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+      a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+      a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]
+    ];
+  },
+  inv: (q) => [-q[0], -q[1], -q[2], q[3]],
+  norm(q) {
+    const l = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
+    return [q[0] / l, q[1] / l, q[2] / l, q[3] / l];
+  },
+  axisAngle(axis, angle) {
+    const a = v3.norm(axis), s = Math.sin(angle / 2);
+    return [a[0] * s, a[1] * s, a[2] * s, Math.cos(angle / 2)];
+  },
+  /** The shortest turn taking direction a onto direction b. */
+  between(a, b) {
+    const u = v3.norm(a), w = v3.norm(b);
+    const c = v3.cross(u, w), d = v3.dot(u, w);
+    if (d < -0.999999) {
+      const axis = Math.abs(u[0]) < 0.9 ? v3.cross(u, [1, 0, 0]) : v3.cross(u, [0, 1, 0]);
+      return quat.axisAngle(axis, Math.PI);
+    }
+    return quat.norm([c[0], c[1], c[2], 1 + d]);
+  },
+  rotate(q, v) {
+    const [x, y, z, w] = [q[0], q[1], q[2], q[3]];
+    const tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
+    return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)];
+  },
+  slerp(a, b, t) {
+    let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+    const s = d < 0 ? -1 : 1;
+    d = Math.abs(d);
+    if (d > 0.9995) return quat.norm([0, 1, 2, 3].map((k) => a[k] + (b[k] * s - a[k]) * t));
+    const th = Math.acos(d), sa = Math.sin((1 - t) * th) / Math.sin(th), sb = Math.sin(t * th) / Math.sin(th) * s;
+    return [0, 1, 2, 3].map((k) => a[k] * sa + b[k] * sb);
+  }
+};
+class SOMAPoseEditor {
+  constructor(pose) {
+    this._dirty = false;
+    this.pose = Float32Array.from(pose);
+    this._world = K.world(this.pose, new Float32Array(K.J * 7));
+  }
+  get world() {
+    if (this._dirty) {
+      K.world(this.pose, this._world);
+      this._dirty = false;
+    }
+    return this._world;
+  }
+  _j(joint) {
+    const j = typeof joint === "number" ? joint : K.index(joint);
+    if (j < 0) throw new Error("No SOMA joint " + joint);
+    return j;
+  }
+  position(joint) {
+    const w = this.world, o = this._j(joint) * 7;
+    return [w[o], w[o + 1], w[o + 2]];
+  }
+  rotation(joint) {
+    const w = this.world, o = this._j(joint) * 7 + 3;
+    return [w[o], w[o + 1], w[o + 2], w[o + 3]];
+  }
+  /** Turn a joint, and all below it, by a world-space rotation about the joint. */
+  turn(joint, q) {
+    const j = this._j(joint), p = K.parents[j];
+    const world = quat.mul(q, this.rotation(j));
+    const local = p < 0 ? world : quat.mul(quat.inv(this.rotation(p)), world);
+    this.pose.set(quat.norm(local), j * 7 + 3);
+    this._dirty = true;
+    return this;
+  }
+  /** Turn a joint by an angle about a world axis. */
+  turnAbout(joint, axis, angle) {
+    return this.turn(joint, quat.axisAngle(axis, angle));
+  }
+  /** Set a joint's world rotation. */
+  setRotation(joint, q) {
+    return this.turn(joint, quat.mul(q, quat.inv(this.rotation(joint))));
+  }
+  /** Move the whole body (the root) in world space. */
+  move(d) {
+    this.pose[0] += d[0];
+    this.pose[1] += d[1];
+    this.pose[2] += d[2];
+    this._dirty = true;
+    return this;
+  }
+  /**
+   * Two-bone IK: turn `upper` and `mid` so that `end` reaches `target`, with `mid` (the knee or elbow) bending
+   * toward `pole`, a world direction. The end joint keeps its world rotation unless `keepEnd` is false.
+   */
+  reach(upper, mid, end, target, pole, keepEnd = true) {
+    const endRotation = this.rotation(end);
+    let a = this.position(upper), b = this.position(mid), c = this.position(end);
+    const lab = v3.len(v3.sub(b, a)), lcb = v3.len(v3.sub(c, b));
+    const lat = Math.min(Math.max(v3.len(v3.sub(target, a)), Math.abs(lab - lcb) + 1e-4), lab + lcb - 1e-4);
+    const clamp = (x) => Math.min(1, Math.max(-1, x));
+    const angle = (u, w) => Math.acos(clamp(v3.dot(v3.norm(u), v3.norm(w))));
+    let axis = v3.cross(v3.sub(c, a), v3.sub(b, a));
+    if (v3.len(axis) < 1e-5) axis = v3.cross(v3.sub(c, a), pole);
+    const acab0 = angle(v3.sub(c, a), v3.sub(b, a)), babc0 = angle(v3.sub(a, b), v3.sub(c, b));
+    const acab1 = Math.acos(clamp((lcb * lcb - lab * lab - lat * lat) / (-2 * lab * lat)));
+    const babc1 = Math.acos(clamp((lat * lat - lab * lab - lcb * lcb) / (-2 * lab * lcb)));
+    this.turnAbout(upper, axis, acab1 - acab0);
+    this.turnAbout(mid, axis, babc1 - babc0);
+    a = this.position(upper);
+    c = this.position(end);
+    this.turn(upper, quat.between(v3.sub(c, a), v3.sub(target, a)));
+    a = this.position(upper);
+    b = this.position(mid);
+    const along = v3.norm(v3.sub(target, a));
+    const flat = (v) => v3.sub(v, v3.scale(along, v3.dot(v, along)));
+    const now = flat(v3.sub(b, a)), want = flat([pole[0], pole[1], pole[2]]);
+    if (v3.len(now) > 1e-5 && v3.len(want) > 1e-5) {
+      const twist = Math.atan2(v3.dot(along, v3.cross(now, want)), v3.dot(now, want));
+      this.turnAbout(upper, along, twist);
+    }
+    if (keepEnd) this.setRotation(end, endRotation);
+    return this;
+  }
+  /** Reach with a leg, the knee toward `pole` (by default the way the hips face). */
+  leg(side, target, pole) {
+    return this.reach(side + "Leg", side + "Shin", side + "Foot", target, pole ?? this.forward());
+  }
+  /** Reach with an arm, the elbow toward `pole` (by default down and back). */
+  arm(side, target, pole, keepHand = false) {
+    const f = this.forward();
+    return this.reach(side + "Arm", side + "ForeArm", side + "Hand", target, pole ?? [-f[0], -1, -f[2]], keepHand);
+  }
+  /** The way the hips face, on the ground. */
+  forward() {
+    const r = this.position("RightLeg"), l = this.position("LeftLeg");
+    const across = v3.norm([r[0] - l[0], 0, r[2] - l[2]]);
+    return v3.norm(v3.cross([0, 1, 0], across));
+  }
+  /** The body's left, on the ground. */
+  left() {
+    const f = this.forward();
+    return [f[2], 0, -f[0]];
+  }
+}
+const other = (s) => s === "Left" ? "Right" : "Left";
+const sideZ = (s) => s === "Right" ? 1 : -1;
+function standing() {
+  return new SOMAPoseEditor(SOMA_BRICKS.rest[0]);
+}
+function trunk(e, lean, turn = 0, tilt = 0, pelvis = 0) {
+  const left = e.left(), forward = e.forward();
+  if (pelvis) e.turnAbout("Hips", left, pelvis);
+  for (const [joint, share] of [["Spine1", 0.4], ["Spine2", 0.35], ["Chest", 0.25]]) {
+    if (lean) e.turnAbout(joint, left, lean * share);
+    if (turn) e.turnAbout(joint, [0, 1, 0], turn * share);
+    if (tilt) e.turnAbout(joint, forward, tilt * share);
+  }
+  return e;
+}
+function look(e, at, share = 0.6) {
+  const head = e.position("Head");
+  const neck = e.position("Neck1");
+  const now = v3.sub(head, neck);
+  const want = v3.sub(at, neck);
+  const q = quatToward(now, want, share);
+  e.turn("Neck1", q);
+  return e;
+}
+function quatToward(a, b, share) {
+  const u = v3.norm(a), w = v3.norm(b);
+  const axis = v3.cross(u, w);
+  const angle = Math.acos(Math.min(1, Math.max(-1, v3.dot(u, w)))) * share;
+  const s = Math.sin(angle / 2), l = v3.len(axis) || 1;
+  return [axis[0] / l * s, axis[1] / l * s, axis[2] / l * s, Math.cos(angle / 2)];
+}
+function kickPoses({ foot = "Right", radius = 0.11, power = 1 } = {}) {
+  const z = sideZ(foot), support = other(foot);
+  const swing = 0.22 + 0.1 * power;
+  const path = [
+    [-radius - 0.14 - swing, 0.2 + 0.08 * power, 0.04 * z],
+    [-radius - 0.14, 0.09, 0.02 * z],
+    [-radius - 0.14 + swing, 0.2 + 0.1 * power, 0]
+  ];
+  return [-1, 0, 1].map((k) => {
+    const e = standing();
+    e.move([-0.24 + 0.03 * k, -0.07, -0.08 * z]);
+    trunk(e, -0.1 - 0.08 * k, -0.3 * z * (1 - 0.6 * k), 0.1 * z);
+    e.leg(support, [-0.1, 0.07, -0.22 * z]);
+    e.leg(foot, path[k + 1], [0.5, k < 0 ? -0.2 : 0.3, 0]);
+    const hips = e.position("Hips");
+    e.arm(foot, v3.add(hips, [-0.35 + 0.1 * k, 0.05, 0.3 * z]));
+    e.arm(support, v3.add(hips, [0.3, 0.3, -0.45 * z]));
+    look(e, [0, 0, 0], 0.5);
+    return e.pose;
+  });
+}
+function carryHands(hands, width = 0.3, side = "Right") {
+  if (hands === "two") return { Left: [0.32, 1.02, -width / 2 - 0.01], Right: [0.32, 1.02, width / 2 + 0.01] };
+  return { [side]: [0.28, 0.98, 0.17 * sideZ(side)] };
+}
+function reachPoses({ height = 0.1, hands = "one", width = 0.3, side = "Right" } = {}) {
+  const z = sideZ(side);
+  const two = hands === "two";
+  const targets = two ? { Right: [0, height + 0.02, width / 2 + 0.02], Left: [0, height + 0.02, -width / 2 - 0.02] } : { [side]: [0.02, height + 0.03, 0.04 * z] };
+  const pose = (depth22, k) => {
+    const e = standing();
+    const back = two ? 0.4 : 0.36;
+    e.move([-back - 0.06 * depth22, -(two ? 0.4 : 0.3) * depth22 - 0.01 * k, two ? 0 : -0.08 * z]);
+    trunk(e, (two ? 0.25 : 0.3) + (two ? 0.5 : 0.6) * depth22, two ? 0 : -0.2 * z, 0, (two ? 0.5 : 0.8) * depth22);
+    const f = two ? 0 : 0.1;
+    e.leg("Right", [-back - 0.02 + f * z, 0.07, 0.19 + (two ? 0.02 : -0.08 * z)]);
+    e.leg("Left", [-back - 0.02 - f * z, 0.07, -0.19 + (two ? -0.02 : -0.08 * z)]);
+    let miss = 0;
+    for (const s of ["Left", "Right"]) {
+      const t = targets[s];
+      if (!t) continue;
+      e.arm(s, t, two ? [-0.3, -0.2, sideZ(s)] : [-0.5, 0.2, 0.6 * z]);
+      miss = Math.max(miss, v3.len(v3.sub(e.position(s + "Hand"), t)));
+    }
+    if (!two) {
+      const hips = e.position("Chest");
+      e.arm(other(side), v3.add(hips, [0.25, 0.05, -0.22 * z]));
+    }
+    look(e, [0, height, 0], 0.3);
+    return { pose: e.pose, miss };
+  };
+  let depth2 = 0;
+  while (depth2 < 1.6 && pose(depth2, 0).miss > 0.015) depth2 += 0.05;
+  reachPoses.lastDepth = depth2;
+  return [0, 1].map((k) => pose(depth2, k).pose);
+}
+reachPoses.lastDepth = 0;
+function carryPoses({ hands = "one", width = 0.3, side = "Right" } = {}) {
+  const e = standing();
+  const at = carryHands(hands, width, side);
+  for (const s of ["Left", "Right"]) {
+    const p = at[s];
+    if (p) e.arm(s, p, [-0.3, -1, 0.6 * sideZ(s)]);
+  }
+  return [e.pose, Float32Array.from(e.pose)];
+}
+function throwPoses({ side = "Right", power = 1 } = {}) {
+  const z = sideZ(side), lead = other(side);
+  const speed = 0.14 + 0.1 * power;
+  let release = [0, 0, 0];
+  const poses = [-1, 0, 1].map((k) => {
+    const e = standing();
+    e.move([0.05 + 0.04 * k, -0.06, 0]);
+    trunk(e, 0.12 + 0.1 * k, (0.15 + 0.25 * k) * z * -1 + 0.2 * z, -0.05 * z);
+    e.leg(lead, [0.38, 0.07, -0.13 * z]);
+    e.leg(side, [-0.36, 0.1, 0.18 * z], [0.3, 0.1, 0.2 * z]);
+    const hand = [0.12 + speed * k, 1.72 - 0.08 * k - 0.06 * k * k, 0.18 * z];
+    e.arm(side, hand, [-0.4, -0.3, 0.8 * z]);
+    const hips = e.position("Hips");
+    e.arm(lead, v3.add(hips, [0.1, 0, -0.3 * z]));
+    if (k === 0) release = e.position(side + "Hand");
+    return e.pose;
+  });
+  return { poses, release };
+}
+function standPoses() {
+  const e = standing();
+  return [e.pose, Float32Array.from(e.pose)];
+}
 const NVIDIA_ASSETS = "https://media.githubusercontent.com/media/NVlabs/motionbricks/main/motionbricks/assets";
 const ASSETS = "https://cdn.jsdelivr.net/gh/repalash/three-motionbricks@v0.2.0/assets/";
 const MOTIONBRICKS_DEFAULTS = {
@@ -2330,13 +2654,26 @@ const MOTIONBRICKS_CHARACTERS = [
   { id: "astronaut", label: "Astronaut", file: "characters/astronaut.glb", rig: "mixamo" },
   { id: "polybot", label: "Polybot", file: "characters/polybot.glb", rig: "mixamo" }
 ];
+const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 const tempA = new Vector3();
+const tempB = new Vector3();
+function ballistic(from, to, gravity = 9.81) {
+  const d = to.clone().sub(from);
+  const flat = Math.hypot(d.x, d.z);
+  const t = 0.35 + flat * 0.07;
+  return new Vector3(d.x / t, (d.y + 0.5 * gravity * t * t) / t, d.z / t);
+}
 class MotionBricksCharacter {
   constructor(options = {}) {
     this.object = new Group();
     this.gait = "walk";
     this._pendingGoal = null;
     this._drive = { active: false, angle: 0, gait: "walk" };
+    this._task = null;
+    this._carry = null;
+    this._shownWorld = new Float32Array(SOMA_SKELETON_INFO.J * 7);
+    this._lastWorld = new Float32Array(SOMA_SKELETON_INFO.J * 7);
+    this._lastDt = 1 / 60;
     this._obstacles = [];
     this.options = options;
     this.object.name = "MotionBricks G1";
@@ -2469,7 +2806,24 @@ class MotionBricksCharacter {
         warmupMs = await time(engine);
       }
     }
-    this.engine = engine;
+    this.engine = new SharedEngine(engine);
+    this._startController(warmupMs);
+    return this;
+  }
+  /**
+   * Share another character's model instead of loading one: several characters, one download and one worker. Their
+   * generations take turns, so each waits a little longer as more share it. Both must use the same rig.
+   */
+  async loadFrom(other2) {
+    if (this.controller) return this;
+    if ((other2.options.rig ?? "g1") !== (this.options.rig ?? "g1")) throw new Error("MotionBricks: loadFrom needs a character with the same rig");
+    await other2.load();
+    this.engine = other2.engine;
+    this._startController(other2.controller?.stats.averageInferenceMs ?? 400);
+    return this;
+  }
+  _startController(warmupMs) {
+    const engine = this.engine;
     const p = this._lastPose;
     const c = p ? new G1Controller(engine, this._bricks, ...this._rig.ground(p), this._rig.heading(p), this._rig) : new G1Controller(engine, this._bricks, 0, 0, 0, this._rig);
     c.gait = this.gait;
@@ -2479,14 +2833,260 @@ class MotionBricksCharacter {
     this._syncObstacles();
     if (this._pendingGoal) c.moveTo(...this._pendingGoal, this.gait);
     this._pendingGoal = null;
-    return this;
   }
   /** Advance the motion by dt seconds and pose the robot. Call it every frame. */
   update(dt) {
     const c = this.controller;
     if (!c) return;
-    c.update(Math.min(dt, 0.1));
-    this.robot?.setPose(c.pose);
+    dt = Math.min(dt, 0.1);
+    if (this._task) this._updateTask();
+    c.update(dt);
+    let pose = c.pose;
+    if (this.options.rig === "soma") {
+      pose = this._carryPose(pose, dt);
+      this._lastWorld.set(this._shownWorld);
+      SOMA_SKELETON_INFO.world(pose, this._shownWorld);
+      this._lastDt = dt;
+      if (this._carry) this._placeCarried();
+    }
+    this.robot?.setPose(pose);
+  }
+  // ---- interactions (the human, rig: 'soma') ----
+  /** The interaction under way, or null. */
+  get interaction() {
+    return this._task ? { kind: this._task.kind, stage: this._task.stage, item: this._task.item } : null;
+  }
+  /** The item being carried, or null. */
+  get carrying() {
+    return this._carry?.item ?? null;
+  }
+  /**
+   * While a kick is under way, the way the ball should go (a world direction on the ground) and how hard (1 is a
+   * firm pass): for your ball physics, which detects the foot meeting the ball with jointPosition.
+   */
+  get kicking() {
+    const t = this._task;
+    if (!t || t.kind !== "kick" || t.stage === "approach") return null;
+    const direction = this._fromG1Direction(t.angle);
+    return { direction, power: t.power, foot: t.foot };
+  }
+  /** A SOMA joint's position in world space as shown, such as 'RightToeBase', 'LeftFoot' or 'RightHand'. */
+  jointPosition(name, target = new Vector3()) {
+    const j = SOMA_SKELETON_INFO.index(name);
+    if (this.options.rig !== "soma" || j < 0) return null;
+    const w = this._shownWorld;
+    return this.object.localToWorld(target.set(w[j * 7], w[j * 7 + 1], w[j * 7 + 2]));
+  }
+  /** A SOMA joint's velocity in world space, m/s, over the last frame. */
+  jointVelocity(name, target = new Vector3()) {
+    const j = SOMA_SKELETON_INFO.index(name);
+    if (this.options.rig !== "soma" || j < 0) return null;
+    const a = this._shownWorld, b = this._lastWorld, o = j * 7;
+    const now = this.object.localToWorld(target.set(a[o], a[o + 1], a[o + 2]));
+    const before = this.object.localToWorld(tempB.set(b[o], b[o + 1], b[o + 2]));
+    return now.sub(before).divideScalar(this._lastDt);
+  }
+  /**
+   * Kick a ball at a world point: walk up to it (lining up first when it is to the side) and swing through it.
+   * `direction` is where it should go (by default straight on from the human); `power` 0.5 to 2.
+   */
+  kick(ball, { direction, power = 1, foot = "Right" } = {}) {
+    if (!this._canInteract()) return false;
+    const at = this._toG1(ball);
+    const [x, y] = this._rig.ground(this.controller.pose);
+    const angle = direction ? this._toG1Direction(direction) : Math.atan2(at[1] - y, at[0] - x);
+    const speed = this.controller.speedOf(this._drive.active ? this._drive.gait : this.gait);
+    this._startTask({ kind: "kick", stage: "approach", at, angle, trigger: Math.min(4, speed * 0.9 + 1), power, foot }, 1.6);
+    return true;
+  }
+  /** Walk to an item, crouch and pick it up; it is then carried until thrown or put down. */
+  pickUp(item) {
+    if (!this._canInteract() || this._carry) return false;
+    const at = this._toG1(item.position);
+    const [x, y] = this._rig.ground(this.controller.pose);
+    const angle = Math.atan2(at[1] - y, at[0] - x);
+    this._startTask({ kind: "pick", stage: "approach", at, angle, trigger: 2, item, power: 1, foot: "Right" }, 0);
+    return true;
+  }
+  /** Throw the carried item at a world point, turning to face it. onRelease gives the velocity that lands it there. */
+  throwAt(target, { power = 1 } = {}) {
+    if (!this._canInteract() || !this._carry) return false;
+    const [x, y] = this._rig.ground(this.controller.pose);
+    const g = this._toG1(target);
+    const angle = Math.atan2(g[1] - y, g[0] - x);
+    this._task = { kind: "throw", stage: "Throw", at: [x, y], angle, trigger: 0, target: target.clone(), power, foot: "Right" };
+    this._drive.active = false;
+    const th = throwPoses({ power });
+    const ahead = 0.1;
+    this.controller.perform([
+      { name: "Throw", window: this._rig.place(th.poses, x + Math.cos(angle) * ahead, y + Math.sin(angle) * ahead, angle), transitionEarly: 2, tokens: range(6, 9) },
+      { name: "Recover", window: this._rig.place(standPoses(), x + Math.cos(angle) * 0.35, y + Math.sin(angle) * 0.35, angle), transitionEarly: 0, tokens: range(6, 9) }
+    ], { name: "throw" });
+    return true;
+  }
+  /**
+   * Put the carried item down at a world point (by default on the ground just ahead), crouching to it. A point above
+   * the ground, such as the top of a stack, puts the item's centre there.
+   */
+  putDown(at) {
+    if (!this._canInteract() || !this._carry) return false;
+    const [x, y] = this._rig.ground(this.controller.pose);
+    const h = this.heading;
+    const g = at ? this._toG1(at) : [x + Math.cos(h) * 0.7, y + Math.sin(h) * 0.7];
+    const angle = Math.hypot(g[0] - x, g[1] - y) > 0.3 ? Math.atan2(g[1] - y, g[0] - x) : h;
+    const size = this._carry.item.size ?? 0.12;
+    const height = at ? Math.max(size / 2 + 0.02, this.object.worldToLocal(tempA.copy(at)).y) : size / 2 + 0.02;
+    this._startTask({ kind: "put", stage: "approach", at: g, angle, trigger: 2, item: this._carry.item, power: 1, foot: "Right", height }, 0);
+    return true;
+  }
+  /** Stop the interaction under way, if it has not started its motion. */
+  cancelInteraction() {
+    if (this._task?.stage === "approach") this._task = null;
+  }
+  _canInteract() {
+    if (this.options.rig !== "soma") {
+      console.warn("MotionBricks: interactions are for the human model (rig: 'soma')");
+      return false;
+    }
+    const c = this.controller;
+    return !!c && !c.busy && !this.seated;
+  }
+  _startTask(task, lineUp) {
+    const c = this.controller;
+    const [x, y] = this._rig.ground(c.pose);
+    const dx = task.at[0] - x, dy = task.at[1] - y;
+    const off = Math.abs(Math.atan2(Math.sin(Math.atan2(dy, dx) - task.angle), Math.cos(Math.atan2(dy, dx) - task.angle)));
+    if (lineUp && off > 0.6 && Math.hypot(dx, dy) > 0.5) task.via = [task.at[0] - Math.cos(task.angle) * lineUp, task.at[1] - Math.sin(task.angle) * lineUp];
+    this._task = task;
+    this._drive.active = false;
+    if (task.via) c.moveTo(task.via[0], task.via[1], this.gait);
+    else this._approach(task);
+    this._updateTask();
+  }
+  /** Walk toward the task's spot, aiming a little short of it so that a late generation never steps onto it. */
+  _approach(task) {
+    const c = this.controller;
+    const [x, y] = this._rig.ground(c.pose);
+    const dx = task.at[0] - x, dy = task.at[1] - y, d = Math.hypot(dx, dy);
+    if (d <= task.trigger) return;
+    const short = Math.min(0.6, d);
+    c.moveTo(task.at[0] - dx / d * short, task.at[1] - dy / d * short, this.gait);
+  }
+  _updateTask() {
+    const t = this._task, c = this.controller;
+    if (t.stage === "approach") {
+      const [x, y] = this._rig.ground(c.pose);
+      if (t.via) {
+        if (Math.hypot(t.via[0] - x, t.via[1] - y) > 0.6) return;
+        t.via = void 0;
+        this._approach(t);
+      }
+      if (Math.hypot(t.at[0] - x, t.at[1] - y) > t.trigger || c.busy) return;
+      this._act(t);
+      return;
+    }
+    const a = c.action;
+    if (a?.name === t.kind) t.stage = a.step;
+    const p = c.playback;
+    if (t.kind === "pick" && !this._carry && t.item) {
+      const hand = this._handHold(t.item);
+      if (hand.distanceTo(t.item.position) < (t.item.size ?? 0.12) * 0.5 + 0.08 || t.stage === "Lift" || a?.step === "Reach" && p && p.frame >= p.transition) {
+        this._carry = { item: t.item, hands: this._hands(t.item), side: "Right", blend: 0 };
+        this.onPickUp?.(t.item);
+      }
+    }
+    if ((t.kind === "throw" || t.kind === "put") && this._carry && !t.done) {
+      const release = t.kind === "throw" ? t.stage === "Recover" || a?.step === "Throw" && p && p.frame >= p.transition : t.stage === "Lift" || a?.step === "Reach" && p && p.frame >= p.transition;
+      if (release) {
+        t.done = true;
+        const item = this._carry.item;
+        this._carry = null;
+        this.onRelease?.(item, t.kind === "throw" && t.target ? ballistic(item.position, t.target) : new Vector3());
+      }
+    }
+    if (!c.busy && !a) this._task = null;
+  }
+  _act(t) {
+    const c = this.controller, rig = this._rig;
+    const [x, y] = rig.ground(c.pose);
+    const back = (d) => [t.at[0] - Math.cos(t.angle) * d, t.at[1] - Math.sin(t.angle) * d];
+    let steps;
+    if (t.kind === "kick") {
+      const [fx, fy] = [t.at[0] + Math.cos(t.angle) * 0.45, t.at[1] + Math.sin(t.angle) * 0.45];
+      steps = [
+        { name: "Kick", window: rig.place(kickPoses({ foot: t.foot, power: t.power }), t.at[0], t.at[1], t.angle), transitionEarly: 4, tokens: range(6, 12) },
+        { name: "Recover", window: rig.place(standPoses(), fx, fy, t.angle), transitionEarly: 0, tokens: range(6, 10) }
+      ];
+    } else {
+      if (Math.hypot(t.at[0] - x, t.at[1] - y) > 0.3) t.angle = Math.atan2(t.at[1] - y, t.at[0] - x);
+      const item = t.item;
+      const hands = this._hands(item), size = item.size ?? 0.12;
+      const height = t.kind === "pick" ? Math.max(0.03, this.object.worldToLocal(tempA.copy(item.position)).y - (hands === "two" ? 0 : size * 0.3)) : (t.height ?? size / 2 + 0.02) - (hands === "two" ? 0 : size * 0.3);
+      const [sx, sy] = back(0.3);
+      steps = [
+        { name: "Reach", window: rig.place(reachPoses({ height, hands, width: size }), t.at[0], t.at[1], t.angle), transitionEarly: 2, tokens: range(6, 12) },
+        { name: "Lift", window: rig.place(t.kind === "pick" ? carryPoses({ hands, width: size }) : standPoses(), sx, sy, t.angle), transitionEarly: 0, tokens: range(6, 9) }
+      ];
+    }
+    t.stage = steps[0].name;
+    c.perform(steps, { name: t.kind });
+  }
+  _hands(item) {
+    return item.hands ?? ((item.size ?? 0.12) > 0.22 ? "two" : "one");
+  }
+  /** Where the hand (or hands) hold an item, in world space. */
+  _handHold(item, target = new Vector3()) {
+    const w = this._shownWorld, k = SOMA_SKELETON_INFO;
+    const at = (name) => tempB.set(w[k.index(name) * 7], w[k.index(name) * 7 + 1], w[k.index(name) * 7 + 2]);
+    if (this._hands(item) === "two") target.copy(at("RightHand")).add(at("LeftHand")).multiplyScalar(0.5);
+    else {
+      const hand = at("RightHand").clone(), knuckle = at("RightHandMiddle1").clone();
+      target.copy(hand).lerp(knuckle, 1.1);
+      target.y -= (item.size ?? 0.12) * 0.35;
+    }
+    return this.object.localToWorld(target);
+  }
+  _placeCarried() {
+    const item = this._carry.item;
+    this._handHold(item, item.position);
+    if (item.object) {
+      const parent = item.object.parent;
+      if (parent) parent.worldToLocal(item.object.position.copy(item.position));
+      else item.object.position.copy(item.position);
+    }
+  }
+  /** The controller's pose with the arms holding the carried item, blended in over a third of a second. */
+  _carryPose(pose, dt) {
+    const carry = this._carry;
+    if (!carry) return pose;
+    carry.blend = Math.min(1, carry.blend + dt * 3);
+    const a = this.controller?.action;
+    if (a && (a.name === "throw" || a.name === "put" || a.name === "pick" && a.step === "Reach")) return pose;
+    const e = new SOMAPoseEditor(pose);
+    const hips = e.position("Hips"), f = e.forward(), l = e.left();
+    const at = carryHands(carry.hands, carry.item.size ?? 0.3, carry.side);
+    const w = carry.blend * carry.blend * (3 - 2 * carry.blend);
+    for (const side of ["Left", "Right"]) {
+      const p = at[side];
+      if (!p) continue;
+      const target = v3.add([hips[0], hips[1] - 0.993, hips[2]], v3.add(v3.scale(f, p[0]), v3.add([0, p[1], 0], v3.scale(l, -p[2]))));
+      const now = e.position(side + "Hand");
+      e.arm(side, v3.lerp(now, target, w), v3.add(v3.scale(f, -0.3), [0, -1, 0]));
+    }
+    this._shown ??= new Float32Array(pose.length);
+    this._shown.set(e.pose);
+    return this._shown;
+  }
+  _toG1Direction(direction) {
+    this.object.updateWorldMatrix(true, false);
+    const o = this.object.worldToLocal(tempA.set(0, 0, 0)).clone();
+    const d = this.object.worldToLocal(tempB.copy(direction)).sub(o);
+    return Math.atan2(-d.z, d.x);
+  }
+  _fromG1Direction(angle) {
+    this.object.updateWorldMatrix(true, false);
+    const d = new Vector3(Math.cos(angle), 0, -Math.sin(angle));
+    return d.transformDirection(this.object.matrixWorld);
   }
   /**
    * Load one of NVIDIA's Smart Primitives for this model: 'jump_0_5m' (a box), 'jump_0_75m' (a wall), 'avoidance'
@@ -2535,6 +3135,7 @@ class MotionBricksCharacter {
   }
   /** Walk or run to a world point and stop there, facing the way it walked. */
   moveTo(point, gait = this.gait) {
+    this.cancelInteraction();
     this.gait = gait;
     this._drive.active = false;
     const g = this._toG1(point);
@@ -2549,6 +3150,7 @@ class MotionBricksCharacter {
   drive(direction, gait = this.gait) {
     const c = this.controller;
     if (!c) return;
+    if (direction && (direction.x !== 0 || direction.z !== 0)) this.cancelInteraction();
     if (!direction || direction.x === 0 && direction.z === 0) {
       if (this._drive.active) c.stop();
       this._drive.active = false;
@@ -2595,7 +3197,8 @@ class MotionBricksCharacter {
   /** Stop the worker. The robot stays in the scene, and load() starts the model again from where it stands. */
   dispose() {
     if (this.controller) this._lastPose = Float32Array.from(this.controller.pose);
-    if (this.engine instanceof MotionBricksRemote) this.engine.worker.terminate();
+    const raw = this.engine instanceof SharedEngine ? this.engine.engine : this.engine;
+    if (raw instanceof MotionBricksRemote) raw.worker.terminate();
     this.engine = void 0;
     this.controller = void 0;
   }
@@ -2642,6 +3245,7 @@ export {
   RetargetedCharacter,
   SAMPLE_RATE,
   SOMAMannequin,
+  SOMAPoseEditor,
   SOMASkeletonInfo,
   SOMA_BRICKS,
   SOMA_MODEL_JOINTS,
@@ -2650,10 +3254,15 @@ export {
   SOMA_RIG,
   SOMA_SKELETON,
   SOMA_SKELETON_INFO,
+  SharedEngine,
+  ballistic,
+  carryHands,
+  carryPoses,
   correctEndpoints$1 as correctEndpoints,
   dequantizePack,
   heading,
   isLowMemoryDevice,
+  kickPoses,
   lerpPose,
   loadG1Primitive,
   loadOrt,
@@ -2666,8 +3275,13 @@ export {
   qpow,
   qrot$2 as qrot,
   qslerp,
+  quat,
   qz,
+  reachPoses,
   setupOrtWeb,
+  standPoses,
+  throwPoses,
+  v3,
   withSpeed
 };
 //# sourceMappingURL=index.mjs.map
