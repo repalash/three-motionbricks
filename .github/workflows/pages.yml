@@ -1,4 +1,4 @@
-# Builds the site (tools/build_site.sh) with both model packs and publishes it to GitHub Pages.
+# Builds the site (tools/build_site.sh) with the G1 and SOMA model packs and publishes it to GitHub Pages.
 # In the repository settings, Pages > Build and deployment > Source must be "GitHub Actions".
 name: Pages
 
@@ -53,10 +53,35 @@ jobs:
           python tools/pack_lite.py mmm_v6_g1_fp32.onnx packs/model-lite
           rm mmm_v6_g1_fp32.onnx
 
+      # The SOMA (human) model, 758 MB, packed the same two ways.
+      - name: Restore the SOMA packs
+        id: soma
+        uses: actions/cache@v4
+        with:
+          path: packs-soma
+          key: packs-soma-${{ hashFiles('tools/pack_model.py', 'tools/pack_lite.py') }}
+
+      - uses: actions/setup-python@v5
+        if: steps.soma.outputs.cache-hit != 'true'
+        with:
+          python-version: '3.13'
+
+      - name: Pack the SOMA model
+        if: steps.soma.outputs.cache-hit != 'true'
+        run: |
+          pip install onnx==1.23.2 onnx-ir==1.1.0 onnxruntime==1.31.1 numpy==2.5.4
+          curl -fL --retry 3 -o mmm_v6_soma_fp32.onnx \
+            https://media.githubusercontent.com/media/NVlabs/motionbricks/main/motionbricks/assets/onnx/soma/mmm_v6_soma_fp32.onnx
+          python tools/pack_model.py mmm_v6_soma_fp32.onnx packs-soma/model
+          python tools/pack_lite.py mmm_v6_soma_fp32.onnx packs-soma/model-lite
+          rm mmm_v6_soma_fp32.onnx
+
       - name: Build the site
         run: |
           tools/build_site.sh _site
           cp -R packs/model packs/model-lite _site/
+          cp -R packs-soma/model _site/soma-model
+          cp -R packs-soma/model-lite _site/soma-model-lite
 
       - uses: actions/upload-pages-artifact@v3
         with:

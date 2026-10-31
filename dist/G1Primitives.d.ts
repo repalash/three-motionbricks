@@ -11,6 +11,12 @@ export declare const G1_PRIMITIVE_SOURCES: {
     /** Clips are in Git LFS, so they come from GitHub's media host; documents name them relative to this folder. */
     clips: string;
 };
+/** The same for the SOMA (human) model's primitives, whose clips are BVH. */
+export declare const SOMA_PRIMITIVE_SOURCES: {
+    documents: string;
+    clips: string;
+};
+export type PrimitiveRig = 'g1' | 'soma';
 export interface G1PrimitiveStep {
     name: string;
     /** Four poses in the pivot's space. */
@@ -48,6 +54,8 @@ export interface G1PrimitiveSequence {
 }
 export interface G1Primitive {
     name: string;
+    /** The model whose poses the targets are: 'g1' or 'soma'. */
+    rig: PrimitiveRig;
     /**
      * 'pass' for primitives the robot goes through on its way (jumps, vaults, ducking), which start by themselves;
      * 'sit' for one with Sit and Stand sequences, which start on request (G1Controller.sit).
@@ -60,14 +68,19 @@ export interface G1Primitive {
     };
     sequences: G1PrimitiveSequence[];
 }
-/**
- * Load one of NVIDIA's G1 Smart Primitives, such as 'jump_0_5m', 'jump_0_75m', 'sit' or 'avoidance', with the
- * clip frames its targets use.
- */
+/** One of NVIDIA's G1 Smart Primitives, such as 'jump_0_5m', 'jump_0_75m', 'sit' or 'avoidance'. */
 export declare function loadG1Primitive(name: string, sources?: {
     documents: string;
     /** Clips are in Git LFS, so they come from GitHub's media host; documents name them relative to this folder. */
     clips: string;
+}): Promise<G1Primitive>;
+/**
+ * Load one of NVIDIA's Smart Primitives for the G1 or SOMA, such as 'jump_0_5m', 'jump_0_75m', 'sit' or
+ * 'avoidance', with the clip frames its targets use.
+ */
+export declare function loadPrimitive(name: string, { rig, sources }?: {
+    rig?: PrimitiveRig;
+    sources?: typeof G1_PRIMITIVE_SOURCES;
 }): Promise<G1Primitive>;
 /** An obstacle in G1 ground space: where its interaction box sits, and the yaw of the primitive's frame. */
 export interface G1Obstacle {

@@ -1,5 +1,6 @@
 import { G1Obstacle } from './G1Primitives';
 import { G1Pose, MotionGenerator } from './MotionBricksG1';
+import { PoseRig } from './PoseRig';
 export interface G1Bricks {
     /** Standing pose, one frame, at the ground origin facing +X. */
     rest: number[][];
@@ -12,6 +13,8 @@ export interface G1Bricks {
      * point of the stride the robot will reach when it gets there, so no step is squeezed or stretched to fit.
      */
     cycles?: Partial<Record<G1Gait, G1StrideCycle>>;
+    /** Walk and run speeds in m/s, when not GAIT_SPEEDS (another skeleton's clips). */
+    speeds?: Record<G1Gait, number>;
 }
 /** One stride of a gait: its frames from a footfall, and the ground travel over the whole stride. */
 export interface G1StrideCycle {
@@ -63,9 +66,18 @@ export declare class G1Controller {
     private _fade;
     private _segmentPose;
     private _fadePose;
-    constructor(engine: MotionGenerator, bricks: G1Bricks, x?: number, y?: number, angle?: number);
+    /** The skeleton's poses: G1_RIG, or SOMA_RIG for the SOMA model. */
+    readonly rig: PoseRig;
+    constructor(engine: MotionGenerator, bricks: G1Bricks, x?: number, y?: number, angle?: number, rig?: PoseRig);
+    /** Walk or run speed in m/s. */
+    speedOf(gait: G1Gait): number;
     get moving(): boolean;
     get generating(): boolean;
+    /** The Smart Primitive being played (a jump, a vault, sitting down), or null. */
+    get action(): {
+        primitive: import('./G1Primitives').G1Primitive | null;
+        step: string;
+    } | null;
     /** The segment being played: its length and transition point in frames, and the playhead. */
     get playback(): {
         frames: number;

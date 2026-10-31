@@ -75,6 +75,20 @@ And when each foot is on the ground, recorded in Chromium in real time. The dott
 | `cache` | `true`: model packs are kept in the browser's Cache Storage (`'three-motionbricks'`, or a name you give), so they download once rather than on every visit and page. A changed `pack.json` replaces the cached pack. `false` always downloads. |
 | `shadows` | `true`: the robot's meshes cast and receive shadows. |
 
+## The human model (SOMA)
+
+NVIDIA also trained MotionBricks on the 30-joint SOMA human skeleton. `rig: 'soma'` runs that model on the same controller (moveTo, drive, jumps and sitting), on a mannequin or on a humanoid character:
+
+```js
+const human = new MotionBricksCharacter({rig: 'soma'})   // NVIDIA's 758 MB SOMA model, or a pack folder
+human.setMannequin()                                     // or setCharacter(gltf.scene, CHARACTER_RIGS.mixamo)
+scene.add(human.object)
+await human.load()
+human.drive(direction, 'run')
+```
+
+`MotionBricksSOMA` is the engine: a port of NVIDIA's SOMA encoding, decoding and endpoint correction, checked against a NumPy port of their kernels (`tools/motionbricks_soma_ref.py`) to 0.005 mm and 0.05°. Poses are local transforms of `SOMA_SKELETON`, the 77-joint skeleton of NVIDIA's USD (the model drives 30 of them). The packs from `tools/pack_model.py` and `pack_lite.py` work as for the G1 (1.5° and 2.9° from fp32). `SOMA_BRICKS` holds the standing pose, the walk (1.5 m/s) and run (4.6 m/s) targets and their stride cycles, baked by `tools/make_soma_bricks.py` and `make_soma_cycles.py`; left and right steps land within 1-4% of each other in time, as in NVIDIA's own clips. A character's rig maps its bones to SOMA joints through `SOMA_PARTS`.
+
 ## Jumps, vaults, ducking and sitting
 
 NVIDIA's [Smart Primitives](https://github.com/NVlabs/motionbricks/blob/main/docs/smart_primitive_editor.md) place a few target poses around an obstacle; the model generates the motion through them. Load one, put it in the world, and the robot uses it on its way:
@@ -82,7 +96,7 @@ NVIDIA's [Smart Primitives](https://github.com/NVlabs/motionbricks/blob/main/doc
 ```js
 const box = await g1.loadPrimitive('jump_0_5m')    // a box 0.55 m wide, 0.39 m high: jumped
 const wall = await g1.loadPrimitive('jump_0_75m')  // a wall 1.57 m long, 0.64 m high: vaulted
-const bar = await g1.loadPrimitive('avoidance')    // a bar at head height: ducked under
+const bar = await g1.loadPrimitive('avoidance')    // a bar at head height: ducked under (the SOMA ones are larger)
 const stool = await g1.loadPrimitive('sit')        // a stool 0.31 m high: g1.sit(obstacle), g1.standUp()
 g1.setObstacles([
     {primitive: box, position: new THREE.Vector3(0, 0, -4)},

@@ -2,12 +2,15 @@ import { Group, Object3D, Vector3 } from 'three';
 import { G1Robot } from './G1Robot';
 import { CharacterRig, RetargetedCharacter } from './RetargetedCharacter';
 import { G1Bricks, G1Controller, G1ControllerStats, G1Gait } from './G1Controller';
+import { SOMAMannequin } from './SOMAMannequin';
 import { MotionGenerator, OrtApi } from './MotionBricksG1';
 import { G1_PRIMITIVE_SOURCES, G1Primitive } from './G1Primitives';
 /** Where the model and ONNX Runtime load from when the options do not say, and where the robot model is. */
 export declare const MOTIONBRICKS_DEFAULTS: {
     /** NVIDIA's original fp32 model, 730 MB. A pack from tools/pack_model.py is about 190 MB. */
     model: string;
+    /** NVIDIA's original fp32 SOMA (human) model, 758 MB, for `rig: 'soma'`. A pack is about 195 MB. */
+    somaModel: string;
     /** This package's assets/ folder on jsDelivr: the robot and the other characters (see MOTIONBRICKS_CHARACTERS). */
     assets: string;
     /** The robot, for your GLTFLoader: assets/unitree_g1.glb in this package (6 MB, BSD-3-Clause, Unitree). */
@@ -57,6 +60,11 @@ export declare const MOTIONBRICKS_CHARACTERS: readonly [{
     readonly rig: "mixamo";
 }];
 export interface MotionBricksCharacterOptions {
+    /**
+     * The model: 'g1' (default) for the Unitree G1, or 'soma' for NVIDIA's SOMA human model, which drives a
+     * mannequin (setMannequin) or a humanoid character.
+     */
+    rig?: 'g1' | 'soma';
     /** A folder with pack.json from tools/pack_model.py (ending in /), or an original MotionBricks G1 .onnx file. */
     model?: string;
     /**
@@ -121,7 +129,7 @@ export declare class MotionBricksCharacter {
     /** Holds the robot. Move or scale it to place the character in your scene. */
     readonly object: Group<import('three').Object3DEventMap>;
     /** The model being posed: the G1 itself, or another model the motion is retargeted to. */
-    robot?: G1Robot | RetargetedCharacter;
+    robot?: G1Robot | RetargetedCharacter | SOMAMannequin;
     engine?: MotionGenerator;
     controller?: G1Controller;
     gait: G1Gait;
@@ -133,6 +141,13 @@ export declare class MotionBricksCharacter {
     private _lastPose?;
     private _drive;
     constructor(options?: MotionBricksCharacterOptions);
+    private get _rig();
+    private get _bricks();
+    /** For `rig: 'soma'`: show the motion on a mannequin built on the SOMA skeleton. It replaces the current model. */
+    setMannequin(options?: {
+        color?: string;
+        accent?: string;
+    }): SOMAMannequin;
     /** The model is loaded and the robot responds to moveTo and drive. */
     get ready(): boolean;
     /** 'wasm' or 'webgpu', once the model is loaded. */
@@ -170,8 +185,9 @@ export declare class MotionBricksCharacter {
     /** Advance the motion by dt seconds and pose the robot. Call it every frame. */
     update(dt: number): void;
     /**
-     * Load one of NVIDIA's G1 Smart Primitives: 'jump_0_5m' (a box 0.55 m wide and 0.39 m high), 'jump_0_75m' (a
-     * wall 1.57 m long and 0.64 m high), and others. Its clips download from NVIDIA's repository.
+     * Load one of NVIDIA's Smart Primitives for this model: 'jump_0_5m' (a box), 'jump_0_75m' (a wall), 'avoidance'
+     * (a bar to duck under) or 'sit' (a stool); primitive.box.size gives its size. Its clips download from NVIDIA's
+     * repository.
      */
     loadPrimitive(name: string): Promise<G1Primitive>;
     /** The obstacles the robot jumps or vaults over on its way, replacing any set before. */

@@ -9,6 +9,8 @@ export interface WorkerLoadOptions {
     sessionOptions: any;
     /** Cache Storage name for model packs, or false to always download. */
     cache?: string | false;
+    /** The model's skeleton: 'g1' (default) or 'soma'. */
+    rig?: 'g1' | 'soma';
 }
 export type WorkerRequest = {
     id: number;

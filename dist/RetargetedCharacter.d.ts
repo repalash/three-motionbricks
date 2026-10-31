@@ -17,6 +17,8 @@ export declare const G1_PARTS: {
     readonly rightHand: "right_wrist_yaw_link";
 };
 export type G1Part = keyof typeof G1_PARTS;
+/** The SOMA joint that drives each part, when the motion comes from the SOMA (human) model. */
+export declare const SOMA_PARTS: Record<G1Part, string>;
 /**
  * How a model's nodes follow the G1. The G1's reference is standing straight with the arms hanging; `rest`
  * turns the model's own rest pose (a T-pose, say) into that.
@@ -144,9 +146,10 @@ export declare const CHARACTER_RIGS: {
     };
 };
 /**
- * Plays G1 poses on another model: a robot with different proportions, or a skinned character. Each mapped node
- * takes the world rotation its G1 part has turned through since the reference pose; the root moves with the
- * G1's pelvis. `setPose` takes the same 36 joint coordinates as G1Robot.
+ * Plays G1 poses, or SOMA poses with `source: 'soma'`, on another model: a robot with different proportions, or a
+ * skinned character. Each mapped node takes the world rotation its part has turned through since the source's
+ * reference pose; the root moves with the source's pelvis. `setPose` takes the source's poses: the 36 joint
+ * coordinates of G1Robot, or SOMA local transforms.
  */
 export declare class RetargetedCharacter {
     /** Holds the model: add this to the scene, or to MotionBricksCharacter.object. */
@@ -156,7 +159,7 @@ export declare class RetargetedCharacter {
     readonly materials: Material[];
     /** The model's scale, so its legs are as long as the G1's and its steps land. */
     readonly scale: number;
-    private _g1;
+    private _src;
     private _parts;
     private _root;
     private _pelvis;
@@ -167,11 +170,13 @@ export declare class RetargetedCharacter {
     /**
      * @param model the loaded model, such as `gltf.scene`
      * @param rig one of CHARACTER_RIGS, or your own mapping
-     * @param matchSize scale the model so its legs match the G1's (default true); otherwise its steps slide
+     * @param matchSize scale the model so its legs match the source's (default true); otherwise its steps slide
+     * @param source the skeleton the motion comes from: 'g1' (default) or 'soma'
      */
-    constructor(model: Object3D, rig: CharacterRig, { shadows, matchSize }?: {
+    constructor(model: Object3D, rig: CharacterRig, { shadows, matchSize, source }?: {
         shadows?: boolean | undefined;
         matchSize?: boolean | undefined;
+        source?: "g1" | "soma" | undefined;
     });
     /** A node's rotation in the space of `object`. */
     private _localQuaternion;

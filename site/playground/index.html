@@ -53,6 +53,7 @@
     <dt>click</dt><dd>walk to a spot; drag to orbit</dd>
   </dl>
   <p class="note">Run at a red box or a black wall to jump it, under a bar to duck. NVIDIA's Smart Primitives place a few target poses around each obstacle; the model generates everything between them.</p>
+  <p class="note" id="models">Model: <a href="?">G1 robot</a> · <a href="?model=human">Human</a> · <a href="?model=human&amp;character=astronaut">Astronaut</a></p>
 </section>
 <button id="sit" type="button">Sit</button>
 <script src="../switcher.js" data-current="playground"></script>
@@ -99,15 +100,27 @@
   scene.add(floor, grid)
 
   // ---- the robot ----
-  const g1 = new MotionBricksCharacter({
-    model: params.get('model') ?? '../model/',
+  // ?model=human runs NVIDIA's SOMA (human) model on a mannequin, or on a character with ?character=.
+  const human = params.get('model') === 'human'
+  document.title = (human ? 'Human playground' : 'Playground') + ' · three-motionbricks'
+  const g1 = new MotionBricksCharacter(human ? {
+    rig: 'soma',
+    model: params.get('somaModel') ?? '../soma-model/',
+    liteModel: params.get('somaLiteModel') ?? '../soma-model-lite/',
+  } : {
+    model: params.get('modelUrl') ?? '../model/',
     liteModel: params.get('liteModel') ?? '../model-lite/',
   })
   scene.add(g1.object)
-  const character = MOTIONBRICKS_CHARACTERS.find(c => c.id === params.get('character')) ?? MOTIONBRICKS_CHARACTERS[0]
-  const gltf = await new GLTFLoader().loadAsync(assets + character.file)
-  if ('rig' in character) g1.setCharacter(gltf.scene, CHARACTER_RIGS[character.rig])
-  else g1.setRobot(gltf.scene)
+  const character = MOTIONBRICKS_CHARACTERS.find(c => c.id === params.get('character'))
+  if (human && (!character || !('rig' in character))) g1.setMannequin()
+  else {
+    const c = character ?? MOTIONBRICKS_CHARACTERS[0]
+    const gltf = await new GLTFLoader().loadAsync(assets + c.file)
+    if ('rig' in c) g1.setCharacter(gltf.scene, CHARACTER_RIGS[c.rig])
+    else g1.setRobot(gltf.scene)
+  }
+  if (human) document.querySelector('h1').textContent = character ? character.label : 'Human'
 
   // ---- the course ----
   // kind: box (jump_0_5m), wall (jump_0_75m), bar (avoidance: duck under), stool (sit). Positions in metres.
@@ -133,8 +146,9 @@
         group.add(new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, h - 0.05, 8), ink).translateX(px).translateZ(pz).translateY((h - 0.05) / 2))
       }
     } else {
-      // A bar at head height on two posts, wide enough to pass under; the robot ducks under its middle.
-      const barY = 1.2, span = 1.7
+      // A bar at head height on two posts, wide enough to pass under; it ducks under the bar. The primitive's box
+      // marks where the head would be.
+      const barY = primitive.box.center[2] - h / 2 + 0.06, span = 1.7
       group.add(new THREE.Mesh(new THREE.BoxGeometry(span, 0.06, 0.06), amber).translateY(barY))
       for (const s of [-1, 1]) group.add(new THREE.Mesh(new THREE.BoxGeometry(0.07, barY + 0.03, 0.07), pale).translateX(s * span / 2).translateY((barY + 0.03) / 2))
     }
@@ -220,11 +234,11 @@
   const label = () => {
     const c = g1.controller
     if (!c) return ''
-    const step = c._segment?.sequence?.steps[c._segment.sequence.next - 1]?.name ?? ''
+    const action = c.action
     if (g1.seated) return c.moving ? 'sitting down' : 'sitting'
-    if (/^(ToStand)/.test(step) && c.moving) return 'standing up'
-    if (step) {
-      const kind = c.obstacles.find(o => o.primitive.sequences.some(s => s.steps.some(x => x.name === step)))?.primitive.name ?? ''
+    if (action?.step === 'ToStand' && c.moving) return 'standing up'
+    if (action?.primitive) {
+      const kind = action.primitive.name
       return kind === 'avoidance' ? 'ducking' : kind === 'jump_0_75m' ? 'vaulting' : 'jumping'
     }
     return c.moving ? c.gait === 'run' ? 'running' : 'walking' : 'standing'
