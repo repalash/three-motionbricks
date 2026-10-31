@@ -9,6 +9,7 @@
     const worlds = [
         {id: 'city', title: 'White city', href: 'city/', color: '#ef3b36'},
         {id: 'bodies', title: 'Seven bodies', href: 'bodies/', color: '#5b3ce0'},
+        {id: 'playground', title: 'Playground', href: 'playground/', color: '#f2a531'},
         {id: 'plain', title: 'Plain three.js', href: 'plain/', color: '#9de02c'},
     ]
     const name = worlds.find(w => w.id === current)?.title ?? 'three-motionbricks'

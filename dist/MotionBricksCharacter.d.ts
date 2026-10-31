@@ -3,6 +3,7 @@ import { G1Robot } from './G1Robot';
 import { CharacterRig, RetargetedCharacter } from './RetargetedCharacter';
 import { G1Bricks, G1Controller, G1ControllerStats, G1Gait } from './G1Controller';
 import { MotionGenerator, OrtApi } from './MotionBricksG1';
+import { G1_PRIMITIVE_SOURCES, G1Primitive } from './G1Primitives';
 /** Where the model and ONNX Runtime load from when the options do not say, and where the robot model is. */
 export declare const MOTIONBRICKS_DEFAULTS: {
     /** NVIDIA's original fp32 model, 730 MB. A pack from tools/pack_model.py is about 190 MB. */
@@ -85,6 +86,18 @@ export interface MotionBricksCharacterOptions {
     shadows?: boolean;
     /** Standing, walk and run target poses. The default ones are baked from the model. */
     bricks?: G1Bricks;
+    /** Where Smart Primitives and their clips load from (loadPrimitive). The default is NVIDIA's repository. */
+    primitives?: typeof G1_PRIMITIVE_SOURCES;
+}
+/**
+ * Something the robot jumps or vaults over: a Smart Primitive placed in the world. `position` is the centre of
+ * the primitive's box on the ground, and `rotation` turns it about Y. The box measures `primitive.box.size`:
+ * width along the obstacle's X, depth along its Z, height up.
+ */
+export interface MotionBricksObstacle {
+    primitive: G1Primitive;
+    position: Vector3;
+    rotation?: number;
 }
 export type LoadStage = 'runtime' | 'model' | 'warmup';
 /**
@@ -156,6 +169,21 @@ export declare class MotionBricksCharacter {
     private _load;
     /** Advance the motion by dt seconds and pose the robot. Call it every frame. */
     update(dt: number): void;
+    /**
+     * Load one of NVIDIA's G1 Smart Primitives: 'jump_0_5m' (a box 0.55 m wide and 0.39 m high), 'jump_0_75m' (a
+     * wall 1.57 m long and 0.64 m high), and others. Its clips download from NVIDIA's repository.
+     */
+    loadPrimitive(name: string): Promise<G1Primitive>;
+    /** The obstacles the robot jumps or vaults over on its way, replacing any set before. */
+    setObstacles(obstacles: MotionBricksObstacle[]): void;
+    private _obstacles;
+    /** Sit on an obstacle whose primitive is 'sit' (one of setObstacles'), from within about two metres. */
+    sit(obstacle: MotionBricksObstacle): void;
+    /** Stand up from the seat. Moving with moveTo or drive also stands up first. */
+    standUp(): void;
+    /** The robot is sitting, or sitting down. */
+    get seated(): boolean;
+    private _syncObstacles;
     /** Convert a world point to the character's G1 ground coordinates. */
     private _toG1;
     /** Walk or run to a world point and stop there, facing the way it walked. */

@@ -49,7 +49,10 @@
     <button type="button" data-gait="walk" aria-pressed="false" disabled>Walk</button>
     <button type="button" data-gait="run" aria-pressed="false" disabled>Run</button>
   </div>
-  <p class="note">One model generates the G1's motion; the other six take the same pose every frame, retargeted to their own skeletons. The floor moves, the bodies stay.</p>
+  <div class="gaits" style="margin-top: 8px">
+    <button type="button" id="hurdles" aria-pressed="true" disabled>Hurdles</button>
+  </div>
+  <p class="note">One model generates the G1's motion; the other six take the same pose every frame, retargeted to their own skeletons. The floor moves, the bodies stay. The jumps are NVIDIA's Smart Primitives: the model generates through a few poses placed around each obstacle.</p>
 </section>
 <script src="../switcher.js" data-current="bodies"></script>
 <script type="module">
@@ -156,6 +159,57 @@
     }
   }
 
+  // Hurdles: boxes in every lane and walls across all of them, coming down the treadmill. The G1 meets them in its
+  // own space (x ahead, y across), and every body shows the same obstacle in its lane.
+  const hurdleButton = document.getElementById('hurdles')
+  let hurdlesOn = params.get('hurdles') !== '0'
+  hurdleButton.setAttribute('aria-pressed', String(hurdlesOn))
+  let primitives = null
+  const course = []
+  let nextHurdle = 0, hurdleCount = 0
+  const boxMaterial = new THREE.MeshStandardMaterial({color: '#ef3b36', roughness: 0.6})
+  const wallMaterial = new THREE.MeshStandardMaterial({color: '#16171a', roughness: 0.5})
+  const addHurdle = (x) => {
+    const kind = hurdleCount++ % 3 === 2 ? 'wall' : 'box'
+    const primitive = primitives[kind]
+    const [w, d, h] = primitive.box.size
+    const group = new THREE.Group()
+    if (kind === 'box') {
+      for (const b of bodies) {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(d, h, w), boxMaterial)
+        m.position.set(0, h / 2, b.holder.position.z)
+        group.add(m)
+      }
+    } else {
+      // One wall across every lane; the robot's primitive only needs its own stretch of it.
+      const m = new THREE.Mesh(new THREE.BoxGeometry(d, h, SPACING * bodies.length), wallMaterial)
+      m.position.y = h / 2
+      group.add(m)
+    }
+    group.traverse(o => { o.castShadow = o.receiveShadow = true })
+    scene.add(group)
+    // In G1 space a box's frame can point any way; a wall's long side runs across the lanes (along y).
+    course.push({kind, x, group, obstacle: {primitive, x, y: 0, yaw: kind === 'wall' ? Math.PI / 2 : -Math.PI / 2}})
+  }
+  const updateCourse = (leaderX) => {
+    if (hurdlesOn && primitives && gait !== 'stand' && leaderX + 16 > nextHurdle) {
+      addHurdle(Math.max(nextHurdle, leaderX + 9))
+      nextHurdle = Math.max(nextHurdle, leaderX + 9) + (gait === 'run' ? 11 : 7)
+    }
+    for (let i = course.length - 1; i >= 0; i--) {
+      if (course[i].x < leaderX - 8) {
+        scene.remove(course[i].group)
+        course.splice(i, 1)
+      }
+    }
+    for (const h of course) h.group.position.x = h.x - leaderX
+    if (g1.controller) g1.controller.obstacles = course.map(h => h.obstacle)
+  }
+  hurdleButton.addEventListener('click', () => {
+    hurdlesOn = !hurdlesOn
+    hurdleButton.setAttribute('aria-pressed', String(hurdlesOn))
+  })
+
   let gait = 'stand'
   const buttons = [...document.querySelectorAll('.gaits button')]
   const setGait = g => {
@@ -172,7 +226,16 @@
       status.textContent = stage === 'model' ? `Downloading the model… ${Math.round(loaded / 1e6)}${total ? ' / ' + Math.round(total / 1e6) : ''} MB` :
         stage === 'warmup' ? 'Warming up…' : 'Loading ONNX Runtime…'
     })
-  }).then(() => {
+  }).then(async() => {
+    // NVIDIA's jump and vault primitives, with their clips from NVIDIA's repository.
+    status.textContent = 'Loading the jumps…'
+    try {
+      const [box, wall] = await Promise.all([g1.loadPrimitive('jump_0_5m'), g1.loadPrimitive('jump_0_75m')])
+      primitives = {box, wall}
+      hurdleButton.disabled = false
+    } catch (e) {
+      console.warn('No hurdles: the jump primitives did not load', e)
+    }
     buttons.forEach(b => b.disabled = false)
     setGait(params.get('gait') === 'run' ? 'run' : 'walk')
   }).catch(e => {
@@ -194,6 +257,7 @@
     if (p) {
       if (lastX !== null) travelled += p[0] - lastX
       lastX = p[0]
+      updateCourse(p[0])
       pose.set(p)
       pose[0] = 0
       pose[1] = 0

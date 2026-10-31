@@ -2,7 +2,7 @@
 
 [![The Unitree G1 running down a red lane through a white block city](docs/hero.jpg)](https://repalash.com/three-motionbricks/city/)
 
-**[Try it live](https://repalash.com/three-motionbricks/)**: [White city](https://repalash.com/three-motionbricks/city/) · [Seven bodies](https://repalash.com/three-motionbricks/bodies/) · [Plain three.js](https://repalash.com/three-motionbricks/plain/). The model downloads once (194 MB on phones, 190 MB on desktops) and is cached after that.
+**[Try it live](https://repalash.com/three-motionbricks/)**: [White city](https://repalash.com/three-motionbricks/city/) · [Seven bodies](https://repalash.com/three-motionbricks/bodies/) · [Playground](https://repalash.com/three-motionbricks/playground/) · [Plain three.js](https://repalash.com/three-motionbricks/plain/). The model downloads once (194 MB on phones, 190 MB on desktops) and is cached after that.
 
 [NVIDIA MotionBricks](https://github.com/NVlabs/motionbricks) for three.js: a Unitree G1 robot that walks and runs where you send it, with every frame of its motion generated in the browser by the model. No animation clips play at runtime.
 
@@ -75,6 +75,23 @@ And when each foot is on the ground, recorded in Chromium in real time. The dott
 | `cache` | `true`: model packs are kept in the browser's Cache Storage (`'three-motionbricks'`, or a name you give), so they download once rather than on every visit and page. A changed `pack.json` replaces the cached pack. `false` always downloads. |
 | `shadows` | `true`: the robot's meshes cast and receive shadows. |
 
+## Jumps, vaults, ducking and sitting
+
+NVIDIA's [Smart Primitives](https://github.com/NVlabs/motionbricks/blob/main/docs/smart_primitive_editor.md) place a few target poses around an obstacle; the model generates the motion through them. Load one, put it in the world, and the robot uses it on its way:
+
+```js
+const box = await g1.loadPrimitive('jump_0_5m')    // a box 0.55 m wide, 0.39 m high: jumped
+const wall = await g1.loadPrimitive('jump_0_75m')  // a wall 1.57 m long, 0.64 m high: vaulted
+const bar = await g1.loadPrimitive('avoidance')    // a bar at head height: ducked under
+const stool = await g1.loadPrimitive('sit')        // a stool 0.31 m high: g1.sit(obstacle), g1.standUp()
+g1.setObstacles([
+    {primitive: box, position: new THREE.Vector3(0, 0, -4)},
+    {primitive: wall, position: new THREE.Vector3(0, 0, -9), rotation: 0},
+])
+```
+
+`position` is the centre of the primitive's box (`primitive.box.size` is its width, depth and height), and `rotation` turns it about Y; a wall's long side runs along its X. When the robot heads at an obstacle, the controller picks the sequence whose starting speed is closest to the robot's, turns and slides it to the approach the way NVIDIA's runtime does, and generates through its steps. The documents and the clip frames the targets come from load from [NVIDIA's repository](https://github.com/NVlabs/motionbricks) (`G1_PRIMITIVE_SOURCES`): the clips are under NVIDIA's Sample Data Evaluation License, so this package ships none of them.
+
 ## The robot
 
 `assets/unitree_g1.glb` (6 MB, 165k triangles) is Unitree's G1 description and meshes in one GLB, built by `tools/build_g1_glb.mjs`. `MOTIONBRICKS_DEFAULTS.robot` points to it on jsDelivr. Its nodes are named after the MJCF bodies, so you can swap its materials, or load your own model with the same node names, and `setRobot` poses it.
@@ -114,4 +131,4 @@ npx serve _site
 
 ## Licenses
 
-The code is Apache 2.0. The MotionBricks ONNX models are under the [NVIDIA Open Model Agreement](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-agreement/), and the G1 description and meshes are Unitree's, under BSD-3-Clause (`assets/LICENSE-unitree.txt`). The gait targets and stride cycles in `G1Bricks.ts` are the model's own output, seeded from NVIDIA's sample clips.
+The code is Apache 2.0. The MotionBricks ONNX models are under the [NVIDIA Open Model Agreement](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-agreement/), and the G1 description and meshes are Unitree's, under BSD-3-Clause (`assets/LICENSE-unitree.txt`). The gait targets and stride cycles in `G1Bricks.ts` are the model's own output, seeded from NVIDIA's sample clips. Smart Primitives and their clips are read from NVIDIA's repository at runtime; the clips are under the [NVIDIA Sample Data Evaluation License](https://github.com/NVlabs/motionbricks/blob/main/assets/motions/LICENSE.txt).

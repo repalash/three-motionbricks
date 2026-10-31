@@ -1,3 +1,4 @@
+import { G1Obstacle } from './G1Primitives';
 import { G1Pose, MotionGenerator } from './MotionBricksG1';
 export interface G1Bricks {
     /** Standing pose, one frame, at the ground origin facing +X. */
@@ -32,6 +33,12 @@ export declare class G1Controller {
     readonly pose: G1Pose;
     goal: [number, number] | null;
     gait: G1Gait;
+    /** Obstacles with a Smart Primitive (see G1Primitives), which the robot jumps or vaults on its way. */
+    obstacles: G1Obstacle[];
+    /** The obstacle the robot sits on, or null. */
+    seat: G1Obstacle | null;
+    /** An action asked for (sit, stand up), to start at the next generation. */
+    private _action;
     /**
      * Seconds of travel between the robot and its gait target. With stride cycles in the bricks, the target is
      * the pose the stride reaches by then and the segment length is fixed to match. Without them, the single gait
@@ -68,6 +75,13 @@ export declare class G1Controller {
     } | null;
     /** Walk or run to a ground point in G1 space, then stop there. */
     moveTo(x: number, y: number, gait?: G1Gait): void;
+    /**
+     * Sit on a 'sit' obstacle: walk the last metre to it, turn and sit, then stay seated. Start within about two
+     * metres of it. Moving again stands up first.
+     */
+    sit(o: G1Obstacle): void;
+    /** Stand up from the seat and stay there. */
+    standUp(): void;
     /** Come to a stop a short way ahead. */
     stop(): void;
     /**
@@ -84,6 +98,12 @@ export declare class G1Controller {
      * Without them, a run keeps its cadence with 10. Slow inference gets 2: more time to generate.
      */
     private _transitionEarly;
+    /**
+     * A jump to start now: the nearest obstacle the probe meets whose first target is no more than `lead` seconds of
+     * travel ahead, with its steps placed for this approach. When the robot is already past the first target, it
+     * starts at the next one still ahead.
+     */
+    private _findJump;
     private _distanceToGoal;
     /** The frame of the current segment where new motion can start, and the four context poses ending there. */
     private _contextAt;

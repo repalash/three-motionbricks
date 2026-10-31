@@ -41,7 +41,7 @@ const MAX_RAW_FRAMES = MAX_TOKENS * POSES_PER_TOKEN;
 const ROOT_POSITION_FILTER = [-0.0465, 0.0639, 0.2827, 0.3998, 0.2827, 0.0639, -0.0465];
 const JOINT_ANGLE_FADE_SECONDS = 0.3;
 const DEFAULT_TOKEN_COUNTS = [8, 9, 10, 11, 12, 13, 14];
-function qmul(a, b) {
+function qmul$1(a, b) {
   const [ax, ay, az, aw] = [a[0], a[1], a[2], a[3]];
   const [bx, by, bz, bw] = [b[0], b[1], b[2], b[3]];
   return [
@@ -51,14 +51,14 @@ function qmul(a, b) {
     aw * bw - ax * bx - ay * by - az * bz
   ];
 }
-function qinv(q) {
+function qinv$1(q) {
   return [-q[0], -q[1], -q[2], q[3]];
 }
-function qnorm(q) {
+function qnorm$1(q) {
   const l = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
   return [q[0] / l, q[1] / l, q[2] / l, q[3] / l];
 }
-function qrot(q, v) {
+function qrot$1(q, v) {
   const [x, y, z, w] = [q[0], q[1], q[2], q[3]];
   const tx = 2 * (y * v[2] - z * v[1]);
   const ty = 2 * (z * v[0] - x * v[2]);
@@ -73,7 +73,7 @@ function qz(angle) {
   return [0, 0, Math.sin(angle / 2), Math.cos(angle / 2)];
 }
 function qpow(q, t) {
-  let [x, y, z, w] = qnorm(q);
+  let [x, y, z, w] = qnorm$1(q);
   if (w < 0) [x, y, z, w] = [-x, -y, -z, -w];
   const s = Math.hypot(x, y, z);
   if (s < 1e-9) return [0, 0, 0, 1];
@@ -85,13 +85,13 @@ function qslerp(a, b, t) {
   let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
   const bs = d < 0 ? -1 : 1;
   d *= bs;
-  if (d > 0.9995) return qnorm([0, 1, 2, 3].map((i) => a[i] + (b[i] * bs - a[i]) * t));
+  if (d > 0.9995) return qnorm$1([0, 1, 2, 3].map((i) => a[i] + (b[i] * bs - a[i]) * t));
   const th = Math.acos(d), s = Math.sin(th);
   const wa = Math.sin((1 - t) * th) / s, wb = Math.sin(t * th) / s * bs;
   return [0, 1, 2, 3].map((i) => a[i] * wa + b[i] * wb);
 }
 function heading(q) {
-  const f = qrot(qnorm(q), [1, 0, 0]);
+  const f = qrot$1(qnorm$1(q), [1, 0, 0]);
   return Math.atan2(f[1], f[0]);
 }
 function fadeWeight(v) {
@@ -315,16 +315,16 @@ class MotionBricksG1 {
     const last = context[POSES_PER_TOKEN - 1];
     const ap = [last[0], last[1], 0];
     const aq = qz(heading([last[3], last[4], last[5], last[6]]));
-    const aqi = qinv(aq);
+    const aqi = qinv$1(aq);
     const encode = (poses2) => {
       const out = new Float32Array(POSES_PER_TOKEN * POSE_SIZE);
       poses2.forEach((p, i) => {
         const o = i * POSE_SIZE;
         for (let k = 0; k < POSE_SIZE; k++) out[o + k] = p[k];
-        const pos = qrot(aqi, [p[0] - ap[0], p[1] - ap[1], p[2] - ap[2]]);
+        const pos = qrot$1(aqi, [p[0] - ap[0], p[1] - ap[1], p[2] - ap[2]]);
         out[o] = pos[0];
         out[o + 1] = pos[1];
-        out.set(qnorm(qmul(aqi, qnorm([p[3], p[4], p[5], p[6]]))), o + 3);
+        out.set(qnorm$1(qmul$1(aqi, qnorm$1([p[3], p[4], p[5], p[6]]))), o + 3);
       });
       return out;
     };
@@ -370,12 +370,12 @@ class MotionBricksG1 {
         for (let k = 0; k < 3; k++) pos[k] += w * predQpos[src + k];
       });
       const o = rf * POSE_SIZE;
-      const wpos = qrot(aq, pos);
+      const wpos = qrot$1(aq, pos);
       const pose = new Float32Array(POSE_SIZE);
       pose[0] = wpos[0] + ap[0];
       pose[1] = wpos[1] + ap[1];
       pose[2] = pos[2];
-      pose.set(qnorm(qmul(aq, qnorm([predQpos[o + 3], predQpos[o + 4], predQpos[o + 5], predQpos[o + 6]]))), 3);
+      pose.set(qnorm$1(qmul$1(aq, qnorm$1([predQpos[o + 3], predQpos[o + 4], predQpos[o + 5], predQpos[o + 6]]))), 3);
       pose.set(predQpos.subarray(o + ROOT_SIZE, o + POSE_SIZE), ROOT_SIZE);
       poses.push(pose);
       footContacts.push(Float32Array.from(predContacts.subarray(rf * 4, rf * 4 + 4), (c) => Math.min(Math.max(c, 0), 1)));
@@ -388,7 +388,7 @@ function correctEndpoints(poses, start, end) {
   const n = poses.length;
   const delta = (p, guide) => ({
     p: [guide[0] - p[0], guide[1] - p[1], guide[2] - p[2]],
-    q: qnorm(qmul(qinv(qnorm([p[3], p[4], p[5], p[6]])), qnorm([guide[3], guide[4], guide[5], guide[6]]))),
+    q: qnorm$1(qmul$1(qinv$1(qnorm$1([p[3], p[4], p[5], p[6]])), qnorm$1([guide[3], guide[4], guide[5], guide[6]]))),
     a: Float32Array.from({ length: POSE_SIZE - ROOT_SIZE }, (_, i) => guide[ROOT_SIZE + i] - p[ROOT_SIZE + i])
   });
   const d0 = delta(poses[0], start);
@@ -398,7 +398,7 @@ function correctEndpoints(poses, start, end) {
     const p = poses[f];
     const w = f / (n - 1);
     const sw = 1 - w;
-    p.set(qnorm(qmul(qmul([p[3], p[4], p[5], p[6]], qpow(d0.q, sw)), qpow(d1.q, w))), 3);
+    p.set(qnorm$1(qmul$1(qmul$1([p[3], p[4], p[5], p[6]], qpow(d0.q, sw)), qpow(d1.q, w))), 3);
     for (let k = 0; k < 3; k++) p[k] += d0.p[k] * sw + d1.p[k] * w;
     const ws = fadeWeight(f / fadeFrames);
     const we = fadeWeight((n - 1 - f) / fadeFrames);
@@ -414,10 +414,10 @@ function placePoses(poses, x, y, angle) {
   const q = qz(angle);
   return poses.map((src) => {
     const p = Float32Array.from(src);
-    const pos = qrot(q, [src[0], src[1], 0]);
+    const pos = qrot$1(q, [src[0], src[1], 0]);
     p[0] = pos[0] + x;
     p[1] = pos[1] + y;
-    p.set(qnorm(qmul(q, [src[3], src[4], src[5], src[6]])), 3);
+    p.set(qnorm$1(qmul$1(q, [src[3], src[4], src[5], src[6]])), 3);
     return p;
   });
 }
@@ -852,12 +852,258 @@ class RetargetedCharacter {
     }
   }
 }
+const NVIDIA_REPO = "https://raw.githubusercontent.com/NVlabs/motionbricks/main/assets/";
+const NVIDIA_LFS = "https://media.githubusercontent.com/media/NVlabs/motionbricks/main/assets/";
+const G1_PRIMITIVE_SOURCES = {
+  documents: NVIDIA_REPO + "smart_primitives/unitree_g1/",
+  /** Clips are in Git LFS, so they come from GitHub's media host; documents name them relative to this folder. */
+  clips: NVIDIA_LFS + "smart_primitives/unitree_g1/"
+};
+function qmul(a, b) {
+  return [
+    a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+    a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+    a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+    a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]
+  ];
+}
+function qnorm(q) {
+  const l = Math.hypot(...q) || 1;
+  return [q[0] / l, q[1] / l, q[2] / l, q[3] / l];
+}
+function qrot(q, v) {
+  const [x, y, z, w] = q;
+  const tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
+  return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)];
+}
+const qinv = (q) => [-q[0], -q[1], -q[2], q[3]];
+const qaxis = (axis, angle) => [axis[0] * Math.sin(angle / 2), axis[1] * Math.sin(angle / 2), axis[2] * Math.sin(angle / 2), Math.cos(angle / 2)];
+const tmul = (a, b) => {
+  const r = qrot(a.q, b.p);
+  return { p: [r[0] + a.p[0], r[1] + a.p[1], r[2] + a.p[2]], q: qnorm(qmul(a.q, b.q)) };
+};
+const tinv = (a) => {
+  const q = qinv(a.q), p = qrot(q, a.p);
+  return { p: [-p[0], -p[1], -p[2]], q };
+};
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const addScaled = (a, b, s) => [a[0] + b[0] * s, a[1] + b[1] * s, a[2] + b[2] * s];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
+function placePose(t, pose) {
+  const out = Float32Array.from(pose);
+  const root = tmul(t, { p: [pose[0], pose[1], pose[2]], q: [pose[3], pose[4], pose[5], pose[6]] });
+  out.set(root.p, 0);
+  out.set(root.q, 3);
+  return out;
+}
+const clipCache = /* @__PURE__ */ new Map();
+async function loadClip(url) {
+  let clip = clipCache.get(url);
+  if (!clip) {
+    clip = fetch(url).then(async (r) => {
+      if (!r.ok) throw new Error(`Could not download ${url}: HTTP ${r.status}`);
+      const rows = (await r.text()).trim().split("\n").slice(1);
+      return rows.map((row) => {
+        const v = row.split(",").map(Number);
+        const p = new Float32Array(POSE_SIZE);
+        p[0] = v[1] * 0.01;
+        p[1] = v[2] * 0.01;
+        p[2] = v[3] * 0.01;
+        const d = Math.PI / 180;
+        p.set(qnorm(qmul(qaxis([0, 0, 1], v[6] * d), qmul(qaxis([0, 1, 0], v[5] * d), qaxis([1, 0, 0], v[4] * d)))), 3);
+        for (let j = 7; j < POSE_SIZE; j++) p[j] = v[j] * d;
+        return p;
+      });
+    });
+    clipCache.set(url, clip);
+  }
+  return clip;
+}
+function sampleClip(frames, seconds) {
+  const f = Math.min(Math.max(seconds * 120, 0), frames.length - 1);
+  const i = Math.min(Math.floor(f), frames.length - 2), t = f - i;
+  const a = frames[i], b = frames[i + 1], out = new Float32Array(POSE_SIZE);
+  for (let k = 0; k < POSE_SIZE; k++) out[k] = a[k] * (1 - t) + b[k] * t;
+  let qa = [a[3], a[4], a[5], a[6]], qb = [b[3], b[4], b[5], b[6]];
+  if (dot([qa[0], qa[1], qa[2]], [qb[0], qb[1], qb[2]]) + qa[3] * qb[3] < 0) qb = qb.map((v) => -v);
+  qa = qnorm([0, 1, 2, 3].map((k) => qa[k] * (1 - t) + qb[k] * t));
+  out.set(qa, 3);
+  return out;
+}
+async function loadG1Primitive(name, sources = G1_PRIMITIVE_SOURCES) {
+  const res = await fetch(sources.documents + name + ".smart_primitive.json");
+  if (!res.ok) throw new Error(`Could not download the ${name} Smart Primitive: HTTP ${res.status}`);
+  const doc = await res.json();
+  const nodes = /* @__PURE__ */ new Map();
+  const walk = (node, parentWorld, parent) => {
+    const world = tmul(parentWorld, { p: node.local_transform.translation, q: node.local_transform.rotation_xyzw });
+    nodes.set(node.id, { node, world, parent });
+    for (const child of node.children ?? []) walk(child, world, node.id);
+  };
+  walk(doc.root, { p: [0, 0, 0], q: [0, 0, 0, 1] }, -1);
+  let box = null;
+  for (const { node, world } of nodes.values()) {
+    const c = node.components.find((x) => x.type === "interaction_box");
+    if (c && !box) box = { center: world.p, size: [c.width, c.depth, c.height] };
+  }
+  if (!box) throw new Error(`The ${name} Smart Primitive has no interaction box`);
+  const pivotAbove = (id) => {
+    for (let n = nodes.get(id); n; n = nodes.get(n.parent)) if (n.node.components.some((x) => x.type === "pivot")) return n.node.id;
+    return -1;
+  };
+  const sequences = await Promise.all(doc.sequences.map(async (s) => {
+    const own = nodes.has(s.pivot_node_id) ? s.pivot_node_id : -1;
+    const pivotId = own >= 0 ? own : pivotAbove(s.node_ids[0]);
+    const pivotNode = nodes.get(pivotId);
+    const pc = pivotNode?.node.components.find((x) => x.type === "pivot");
+    const pivot = pc && pivotNode ? {
+      transform: pivotNode.world,
+      motion: pc.motion_direction,
+      translationAxis: pc.translation_constraint === "line_projection" ? AXES[pc.translation_axis] ?? null : null,
+      lineMin: pc.line_min_offset,
+      lineMax: pc.line_max_offset,
+      rotationAxis: AXES[pc.rotation_axis] ?? null,
+      coneHalfAngle: pc.rotation_constraint === "cone" ? pc.cone_half_angle_degrees * Math.PI / 180 : Infinity,
+      coneCenters: pc.cone_side === "both" ? [0, Math.PI] : pc.cone_side === "mirrored" ? [Math.PI] : [0],
+      rotationFirst: pc.operation_order === "rotation_then_translation"
+    } : {
+      transform: { p: [0, 0, 0], q: [0, 0, 0, 1] },
+      motion: [0, 1, 0],
+      translationAxis: null,
+      lineMin: 0,
+      lineMax: 0,
+      rotationAxis: null,
+      coneHalfAngle: Infinity,
+      coneCenters: [0],
+      rotationFirst: true
+    };
+    const toPivot = tinv(pivot.transform);
+    const steps = await Promise.all(s.node_ids.map(async (id) => {
+      const { node, world } = nodes.get(id);
+      const c = node.components.find((x) => x.type === "target_pose");
+      const frames = await loadClip(new URL(c.clip, sources.clips).href);
+      const start = c.playback_mode === "frames" ? c.frame_index / 120 : c.sample_time_seconds;
+      const count = Math.min(Math.max(c.num_poses_to_use ?? POSES_PER_TOKEN, 1), POSES_PER_TOKEN);
+      const toLocal = tmul(toPivot, world);
+      const window = Array.from({ length: count }, (_, k) => placePose(toLocal, sampleClip(frames, start + k / SAMPLE_RATE)));
+      const tokens = [];
+      for (let t = c.min_tokens ?? 6; t <= (c.max_tokens ?? 14); t++) tokens.push(t);
+      return { name: node.name, window, transitionEarly: c.transition_early_by_frames ?? 8, tokens };
+    }));
+    const w = steps[0].window;
+    const startSpeed = w.length > 1 ? Math.hypot(w[1][0] - w[0][0], w[1][1] - w[0][1]) * SAMPLE_RATE : 0;
+    return { name: s.name, startSpeed, steps, pivot, pivotId, aligns: own >= 0 };
+  }));
+  const names = sequences.map((q) => q.name);
+  return { name, kind: names.includes("Sit") && names.includes("Stand") ? "sit" : "pass", box, sequences };
+}
+const PROBE = { near: 0.15, minDepth: 0.75, lookahead: 1, extraMinSpeed: 2.3, extraTime: 0.25, width: 1 };
+function probeSegment(p, d, speed) {
+  const reach = speed * PROBE.lookahead + Math.max(0, speed - PROBE.extraMinSpeed) * PROBE.extraTime;
+  return [addScaled(p, d, PROBE.near), addScaled(p, d, Math.max(PROBE.near + PROBE.minDepth, reach))];
+}
+function obstacleFrame(o) {
+  const c = o.primitive.box.center;
+  return tmul({ p: [o.x, o.y, 0], q: qaxis([0, 0, 1], o.yaw) }, { p: [-c[0], -c[1], 0], q: [0, 0, 0, 1] });
+}
+function closestPointOnSegment(a, b, p) {
+  const s = sub(b, a), t = dot(sub(p, a), s) / (dot(s, s) + 1e-6);
+  return addScaled(a, s, Math.min(Math.max(t, 0), 1));
+}
+function closestPointToSegment(a, b, c, d) {
+  const ab = sub(b, a), cd = sub(d, c);
+  const h = Math.hypot(...ab) / 2, oh = Math.hypot(...cd) / 2;
+  const u = h > 0 ? [ab[0] / (2 * h), ab[1] / (2 * h), ab[2] / (2 * h)] : ab;
+  const v = oh > 0 ? [cd[0] / (2 * oh), cd[1] / (2 * oh), cd[2] / (2 * oh)] : cd;
+  const center = addScaled(a, u, h), otherCenter = addScaled(c, v, oh);
+  const offset = sub(center, otherCenter), cosine = dot(u, v), along = dot(u, offset), otherAlong = dot(v, offset);
+  const t = (cosine * otherAlong - along) / (1 - cosine * cosine + 1e-6);
+  const point = addScaled(center, u, Math.min(Math.max(t, -h), h));
+  const otherPoint = addScaled(otherCenter, v, Math.min(Math.max(otherAlong + cosine * t, -oh), oh));
+  const projected = closestPointOnSegment(a, b, otherPoint), otherProjected = closestPointOnSegment(c, d, point);
+  const d1 = sub(otherPoint, projected), d2 = sub(point, otherProjected);
+  return dot(d1, d1) < dot(d2, d2) ? projected : point;
+}
+function alignedPivot(pivot, authored, p, d, speed) {
+  let limits = authored;
+  let position = authored.p, rotation = authored.q;
+  const rotate = () => {
+    if (!pivot.rotationAxis) return rotation;
+    const axis = qrot(limits.q, pivot.rotationAxis);
+    let motion = qrot(limits.q, pivot.motion);
+    motion = addScaled(motion, axis, -dot(motion, axis));
+    const desired = addScaled(d, axis, -dot(d, axis));
+    if (Math.hypot(...motion) < 1e-6 || Math.hypot(...desired) < 1e-6) return rotation;
+    const wanted = Math.atan2(dot(axis, cross(motion, desired)), dot(motion, desired));
+    let angle = wanted;
+    if (Number.isFinite(pivot.coneHalfAngle)) {
+      let best = Infinity;
+      for (const c of pivot.coneCenters) {
+        const delta = wrap(wanted - c), clamped = Math.max(-pivot.coneHalfAngle, Math.min(pivot.coneHalfAngle, delta));
+        if (Math.abs(delta - clamped) < best) {
+          best = Math.abs(delta - clamped);
+          angle = c + clamped;
+        }
+      }
+    }
+    return qnorm(qmul(qaxis(axis, angle), limits.q));
+  };
+  const slide = () => {
+    if (!pivot.translationAxis) return position;
+    const axis = qrot(limits.q, pivot.translationAxis);
+    const [near, far] = probeSegment(p, d, speed);
+    return closestPointToSegment(addScaled(limits.p, axis, pivot.lineMin), addScaled(limits.p, axis, pivot.lineMax), near, far);
+  };
+  if (pivot.rotationFirst) {
+    rotation = rotate();
+    if (pivot.rotationAxis) limits = { p: limits.p, q: rotation };
+    position = slide();
+  } else {
+    position = slide();
+    rotation = rotate();
+  }
+  return { p: position, q: rotation };
+}
+function placeSequence(o, sequence, x, y, angle, speed) {
+  const authored = tmul(obstacleFrame(o), sequence.pivot.transform);
+  let pivot = o.pivots?.get(sequence.pivotId) ?? authored;
+  if (sequence.aligns) {
+    pivot = alignedPivot(sequence.pivot, authored, [x, y, 0], [Math.cos(angle), Math.sin(angle), 0], speed);
+    (o.pivots ??= /* @__PURE__ */ new Map()).set(sequence.pivotId, pivot);
+  }
+  return sequence.steps.map((step) => ({ ...step, window: step.window.map((pose) => placePose(pivot, pose)) }));
+}
+function probeHits(o, x, y, angle, speed, extra = 0) {
+  const d = [Math.cos(angle), Math.sin(angle), 0];
+  const [near, far0] = probeSegment([x, y, 0], d, speed);
+  const far = addScaled(far0, d, extra);
+  const frame = obstacleFrame(o), box = o.primitive.box;
+  const centre = tmul(frame, { p: box.center, q: [0, 0, 0, 1] }).p;
+  const ax = qrot(frame.q, [1, 0, 0]), ay = qrot(frame.q, [0, 1, 0]);
+  const pc = [(near[0] + far[0]) / 2, (near[1] + far[1]) / 2, 0];
+  const pu = [-d[1], d[0], 0];
+  const ph = [PROBE.width / 2, Math.hypot(far[0] - near[0], far[1] - near[1]) / 2];
+  const bh = [box.size[0] / 2, box.size[1] / 2];
+  const between = sub(centre, pc);
+  for (const axis of [pu, d, ax, ay]) {
+    const r1 = ph[0] * Math.abs(dot(pu, axis)) + ph[1] * Math.abs(dot(d, axis));
+    const r2 = bh[0] * Math.abs(dot(ax, axis)) + bh[1] * Math.abs(dot(ay, axis));
+    if (Math.abs(dot(between, axis)) > r1 + r2) return false;
+  }
+  return true;
+}
 const FADE_FRAMES = 8;
 const GAIT_SPEEDS = { walk: 1.13, run: 3.43 };
 class G1Controller {
   constructor(engine, bricks, x = 0, y = 0, angle = 0) {
     this.goal = null;
     this.gait = "walk";
+    this.obstacles = [];
+    this.seat = null;
+    this._action = null;
     this.lead = 1;
     this.stats = { generations: 0, lastInferenceMs: 0, averageInferenceMs: 0, lastTokenCount: 0 };
     this._segment = null;
@@ -893,6 +1139,28 @@ class G1Controller {
     this.gait = gait;
     this._regenerate();
   }
+  /**
+   * Sit on a 'sit' obstacle: walk the last metre to it, turn and sit, then stay seated. Start within about two
+   * metres of it. Moving again stands up first.
+   */
+  sit(o) {
+    const sequence = o.primitive.sequences.find((q) => q.name === "Sit");
+    if (!sequence || this.seat) return;
+    const angle = Math.atan2(o.y - this.pose[1], o.x - this.pose[0]);
+    const steps = placeSequence(o, sequence, this.pose[0], this.pose[1], angle, GAIT_SPEEDS.walk);
+    this.goal = null;
+    this._action = { steps, next: 0, hold: true, seat: o };
+    if (!this._request && !this._pending) this._generate(true);
+  }
+  /** Stand up from the seat and stay there. */
+  standUp() {
+    const o = this.seat;
+    const sequence = o?.primitive.sequences.find((q) => q.name === "Stand");
+    if (!o || !sequence) return;
+    this.goal = null;
+    this._action = { steps: placeSequence(o, sequence, this.pose[0], this.pose[1], 0, 0), next: 0, hold: true };
+    if (!this._request && !this._pending) this._generate(true);
+  }
   /** Come to a stop a short way ahead. */
   stop() {
     this.goal = null;
@@ -903,6 +1171,8 @@ class G1Controller {
    * belongs to the segment it was made from, so none is made while another waits to take over.
    */
   _regenerate() {
+    const seq = this._pending?.request.sequence ?? this._request?.sequence ?? this._segment?.sequence;
+    if (seq && seq.next < seq.steps.length) return;
     if (this._request || this._pending) this._dirty = true;
     else this._generate(true);
   }
@@ -955,6 +1225,28 @@ class G1Controller {
     if (gait !== "run" || Math.max(this.stats.averageInferenceMs, this.stats.lastInferenceMs) >= 600) return 2;
     return this.bricks.cycles?.run ? 6 : 10;
   }
+  /**
+   * A jump to start now: the nearest obstacle the probe meets whose first target is no more than `lead` seconds of
+   * travel ahead, with its steps placed for this approach. When the robot is already past the first target, it
+   * starts at the next one still ahead.
+   */
+  _findJump(from, angle, speed, distance) {
+    let best, bestAhead = Infinity;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const ahead = (p) => (p[0] - from[0]) * cos + (p[1] - from[1]) * sin;
+    for (const o of this.obstacles) {
+      if (o.primitive.kind !== "pass" || !probeHits(o, from[0], from[1], angle, speed, speed * this.lead + 3)) continue;
+      const sequence = o.primitive.sequences.reduce((a, b) => Math.abs(b.startSpeed - speed) < Math.abs(a.startSpeed - speed) ? b : a);
+      const steps = placeSequence(o, sequence, from[0], from[1], angle, speed);
+      const entry = ahead(steps[0].window[0]);
+      if (entry > speed * this.lead + 0.3 || entry >= bestAhead) continue;
+      const first = steps.findIndex((s) => ahead(s.window[0]) > 0.3);
+      if (first < 0 || ahead(steps[steps.length - 1].window[0]) > distance + 0.5) continue;
+      best = { steps, next: first };
+      bestAhead = entry;
+    }
+    return best;
+  }
   _distanceToGoal() {
     return this.goal ? Math.hypot(this.goal[0] - this.pose[0], this.goal[1] - this.pose[1]) : 0;
   }
@@ -985,9 +1277,27 @@ class G1Controller {
     let targets;
     let stopping;
     let options;
+    let sequence;
     const lead = this.lead;
     const cycle = this.bricks.cycles?.[this.gait];
-    if (distance > speed * lead + 0.8 && cycle && this._segment && !this._segment.stopping) {
+    const playing = this._segment?.sequence;
+    let jump = playing && playing.next < playing.steps.length ? playing : void 0;
+    if (!jump && this._action) {
+      jump = this._action;
+      this._action = null;
+    }
+    if (!jump && this.seat && this.goal) {
+      const stand = this.seat.primitive.sequences.find((q) => q.name === "Stand");
+      if (stand) jump = { steps: placeSequence(this.seat, stand, from[0], from[1], 0, 0), next: 0 };
+    }
+    if (!jump && this._segment && !this._segment.stopping && distance > 1) jump = this._findJump(from, angle, speed, distance);
+    if (jump) {
+      const step = jump.steps[jump.next];
+      targets = step.window;
+      options = { tokens: step.tokens };
+      sequence = { ...jump, next: jump.next + 1 };
+      stopping = !!jump.hold && jump.next === jump.steps.length - 1;
+    } else if (distance > speed * lead + 0.8 && cycle && this._segment && !this._segment.stopping) {
       const tokens = Math.round((lead * SAMPLE_RATE + POSES_PER_TOKEN + BOUNDARY_FRAMES) / POSES_PER_TOKEN);
       const frames = Math.round(segmentSeconds(tokens) * SAMPLE_RATE);
       const ahead = speed * frames / SAMPLE_RATE;
@@ -1012,7 +1322,15 @@ class G1Controller {
       const tokens = DEFAULT_TOKEN_COUNTS.filter((t) => segmentSeconds(t) >= need);
       if (tokens.length < DEFAULT_TOKEN_COUNTS.length) options = { tokens };
     }
-    const request = { id: ++this._requestId, segment: this._segment, startFrame, stopping, gait: this.gait };
+    const request = {
+      id: ++this._requestId,
+      segment: this._segment,
+      startFrame,
+      stopping,
+      gait: this.gait,
+      sequence,
+      transitionEarly: sequence ? sequence.steps[sequence.next - 1].transitionEarly : void 0
+    };
     this._request = request;
     this._dirty = false;
     this.engine.generate(context, targets, options).then((motion) => {
@@ -1042,6 +1360,7 @@ class G1Controller {
       this._dirty = true;
       return;
     }
+    if (request.sequence && request.sequence.next === 1) this.seat = request.sequence.seat ?? null;
     let prefix;
     if (seg && request.startFrame >= 0) {
       const frames = [...seg.prefix, ...seg.poses];
@@ -1058,8 +1377,9 @@ class G1Controller {
     this._segment = {
       poses,
       prefix,
-      transitionEarly: request.stopping ? 0 : this._transitionEarly(request.gait),
-      stopping: request.stopping
+      transitionEarly: request.stopping ? 0 : request.transitionEarly ?? this._transitionEarly(request.gait),
+      stopping: request.stopping,
+      sequence: request.sequence
     };
   }
 }
@@ -1293,6 +1613,7 @@ class MotionBricksCharacter {
     this.gait = "walk";
     this._pendingGoal = null;
     this._drive = { active: false, angle: 0, gait: "walk" };
+    this._obstacles = [];
     this.options = options;
     this.object.name = "MotionBricks G1";
   }
@@ -1388,6 +1709,7 @@ class MotionBricksCharacter {
     c.stats.averageInferenceMs = warmupMs;
     c.onError = (e) => this.onError ? this.onError(e) : console.error("MotionBricks: generation failed", e);
     this.controller = c;
+    this._syncObstacles();
     if (this._pendingGoal) c.moveTo(...this._pendingGoal, this.gait);
     this._pendingGoal = null;
     return this;
@@ -1398,6 +1720,45 @@ class MotionBricksCharacter {
     if (!c) return;
     c.update(Math.min(dt, 0.1));
     this.robot?.setPose(c.pose);
+  }
+  /**
+   * Load one of NVIDIA's G1 Smart Primitives: 'jump_0_5m' (a box 0.55 m wide and 0.39 m high), 'jump_0_75m' (a
+   * wall 1.57 m long and 0.64 m high), and others. Its clips download from NVIDIA's repository.
+   */
+  async loadPrimitive(name) {
+    return loadG1Primitive(name, this.options.primitives);
+  }
+  /** The obstacles the robot jumps or vaults over on its way, replacing any set before. */
+  setObstacles(obstacles) {
+    this._obstacles = obstacles;
+    this._syncObstacles();
+  }
+  /** Sit on an obstacle whose primitive is 'sit' (one of setObstacles'), from within about two metres. */
+  sit(obstacle) {
+    const i = this._obstacles.indexOf(obstacle);
+    const o = this.controller?.obstacles[i];
+    if (i < 0 || !o) return;
+    this._drive.active = false;
+    this.controller.sit(o);
+  }
+  /** Stand up from the seat. Moving with moveTo or drive also stands up first. */
+  standUp() {
+    this.controller?.standUp();
+  }
+  /** The robot is sitting, or sitting down. */
+  get seated() {
+    return !!this.controller?.seat;
+  }
+  _syncObstacles() {
+    const c = this.controller;
+    if (!c) return;
+    this.object.updateWorldMatrix(true, false);
+    const turn = this.object.getWorldQuaternion(new Quaternion());
+    const objectYaw = Math.atan2(2 * (turn.w * turn.y + turn.x * turn.z), 1 - 2 * (turn.y * turn.y + turn.z * turn.z));
+    c.obstacles = this._obstacles.map((o) => {
+      const [x, y] = this._toG1(o.position);
+      return { primitive: o.primitive, x, y, yaw: (o.rotation ?? 0) - objectYaw };
+    });
   }
   /** Convert a world point to the character's G1 ground coordinates. */
   _toG1(point) {
@@ -1434,7 +1795,7 @@ class MotionBricksCharacter {
     const goal = [c.pose[0] + Math.cos(angle) * ahead, c.pose[1] + Math.sin(angle) * ahead];
     const d = this._drive;
     const turn = Math.abs(Math.atan2(Math.sin(angle - d.angle), Math.cos(angle - d.angle)));
-    if (!d.active || gait !== d.gait || turn > 0.35) {
+    if (!d.active || gait !== d.gait || turn > 0.26) {
       Object.assign(d, { active: true, angle, gait });
       c.moveTo(goal[0], goal[1], gait);
     } else c.goal = goal;
@@ -1496,6 +1857,7 @@ export {
   G1_JOINT_BODIES,
   G1_JOINT_NAMES,
   G1_PARTS,
+  G1_PRIMITIVE_SOURCES,
   GAIT_SPEEDS,
   MOTIONBRICKS_CACHE,
   MOTIONBRICKS_CHARACTERS,
@@ -1514,13 +1876,14 @@ export {
   heading,
   isLowMemoryDevice,
   lerpPose,
+  loadG1Primitive,
   loadOrt,
   placePoses,
-  qinv,
-  qmul,
-  qnorm,
+  qinv$1 as qinv,
+  qmul$1 as qmul,
+  qnorm$1 as qnorm,
   qpow,
-  qrot,
+  qrot$1 as qrot,
   qslerp,
   qz,
   setupOrtWeb,
