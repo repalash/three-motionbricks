@@ -79,10 +79,13 @@ export interface MotionBricksCharacterOptions {
     /** Parts of the ORT .wasm file, joined in order, for hosts that limit file size. */
     wasm?: string[];
     /**
-     * 'wasm' (default) or 'webgpu'. With onnxruntime-web 1.30, WebGPU computes this model wrongly: the robot
-     * sinks, sprints or walks away from its goal. It is here for testing newer releases.
+     * 'auto' (default): WebGPU where the browser has it and the device is not short of memory, if a warm
+     * generation takes no more than `gpuLimitMs`; otherwise WebAssembly. Or 'wasm' or 'webgpu' always. With
+     * onnxruntime-web 1.30's WebGPU build, both models compute the same motion as on WebAssembly (to 0.01 mm).
      */
-    backend?: 'wasm' | 'webgpu';
+    backend?: 'auto' | 'wasm' | 'webgpu';
+    /** With `backend: 'auto'`, a warm WebGPU generation slower than this (ms) falls back to WebAssembly. Default 300. */
+    gpuLimitMs?: number;
     /** Run the model in a Web Worker (default true). On the page, every generation stalls rendering. */
     worker?: boolean;
     /**

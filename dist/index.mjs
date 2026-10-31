@@ -2417,30 +2417,57 @@ class MotionBricksCharacter {
     const useLite = !!o.liteModel && (o.lite === true || (o.lite ?? "auto") === "auto" && isLowMemoryDevice());
     const soma = o.rig === "soma";
     const model = useLite ? o.liteModel : o.model ?? (soma ? MOTIONBRICKS_DEFAULTS.somaModel : MOTIONBRICKS_DEFAULTS.model);
-    const useGpu = o.backend === "webgpu" && typeof navigator !== "undefined" && "gpu" in navigator;
-    const ortUrl = o.ort ?? (useGpu ? MOTIONBRICKS_DEFAULTS.ortWebGpu : MOTIONBRICKS_DEFAULTS.ort);
+    const backend = o.backend ?? "auto";
+    const hasGpu = typeof navigator !== "undefined" && "gpu" in navigator;
     const cache = o.cache === false ? false : typeof o.cache === "string" ? o.cache : MOTIONBRICKS_CACHE;
-    const sessionOptions = { executionProviders: useGpu ? ["webgpu", "wasm"] : ["wasm"], graphOptimizationLevel: "all" };
     const progress = (l, t) => onProgress?.("model", l, t);
+    const create = async (gpu) => {
+      const ortUrl = o.ort ?? (gpu ? MOTIONBRICKS_DEFAULTS.ortWebGpu : MOTIONBRICKS_DEFAULTS.ort);
+      const providers = backend === "webgpu" ? ["webgpu", "wasm"] : ["webgpu"];
+      const sessionOptions = { executionProviders: gpu ? providers : ["wasm"], graphOptimizationLevel: "all" };
+      let engine2 = null;
+      if (o.worker !== false) {
+        engine2 = await MotionBricksRemote.Load({ ort: ortUrl, wasm: o.wasm, model, sessionOptions, cache, rig: soma ? "soma" : "g1" }, progress).catch((e) => {
+          if (!(e instanceof MotionBricksWorkerError)) throw e;
+          console.warn("MotionBricks: the worker could not start, running the model on the page instead", e);
+          return null;
+        });
+      }
+      return engine2 ?? await (soma ? MotionBricksSOMA : MotionBricksG1).Load(await loadOrt(ortUrl, o.wasm), model, sessionOptions, progress, cache);
+    };
+    const stop = (engine2) => {
+      if (engine2 instanceof MotionBricksRemote) engine2.worker.terminate();
+    };
+    const rest = Float32Array.from(this._bricks.rest[0]);
+    const time = async (engine2) => {
+      try {
+        return (await engine2.generate([rest, rest, rest, rest], [rest])).inferenceMs;
+      } catch (e) {
+        stop(engine2);
+        throw e;
+      }
+    };
     onProgress?.("runtime", 0, 1);
-    let engine = null;
-    if (o.worker !== false) {
-      engine = await MotionBricksRemote.Load({ ort: ortUrl, wasm: o.wasm, model, sessionOptions, cache, rig: soma ? "soma" : "g1" }, progress).catch((e) => {
-        if (!(e instanceof MotionBricksWorkerError)) throw e;
-        console.warn("MotionBricks: the worker could not start, running the model on the page instead", e);
-        return null;
+    const auto = backend === "auto" && hasGpu && !useLite;
+    let engine;
+    if (auto) {
+      engine = await create(true).catch(async (e) => {
+        console.warn("MotionBricks: WebGPU did not load, using WebAssembly", e);
+        return create(false);
       });
-    }
-    if (!engine) engine = await (soma ? MotionBricksSOMA : MotionBricksG1).Load(await loadOrt(ortUrl, o.wasm), model, sessionOptions, progress, cache);
+    } else engine = await create(backend === "webgpu" && hasGpu);
     onProgress?.("warmup", 0, 1);
     if (useLite) await new Promise((resolve) => setTimeout(resolve, 2e3));
-    const rest = Float32Array.from(this._bricks.rest[0]);
-    let warmupMs = 0;
-    try {
-      warmupMs = (await engine.generate([rest, rest, rest, rest], [rest])).inferenceMs;
-    } catch (e) {
-      if (engine instanceof MotionBricksRemote) engine.worker.terminate();
-      throw e;
+    let warmupMs = await time(engine);
+    if (auto && engine.backend === "webgpu") {
+      const limit = o.gpuLimitMs ?? 300;
+      if (warmupMs < limit * 10) warmupMs = await time(engine);
+      if (warmupMs > limit) {
+        console.info(`MotionBricks: WebGPU took ${Math.round(warmupMs)} ms a generation, using WebAssembly`);
+        stop(engine);
+        engine = await create(false);
+        warmupMs = await time(engine);
+      }
     }
     this.engine = engine;
     const p = this._lastPose;
